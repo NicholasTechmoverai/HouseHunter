@@ -56,7 +56,11 @@ class RentalRepository:
 
     async def get_by_slug(self, slug: str) -> Optional[RentalComplex]:
         """Get rental by its slug."""
-        return await self.model.get_or_none(slug=slug)
+        return await self.model.get_or_none(slug=slug).prefetch_related('rules', 'amenities', 'pricing__fees', 'gallery','publisher','managers')
+    
+    async def get_by_public_id(self, public_id: str) -> Optional[RentalComplex]:
+        """Get rental by its public ID."""
+        return await self.model.get_or_none(public_id=public_id).prefetch_related('rules', 'amenities', 'pricing__fees', 'gallery','publisher','managers')
 
     async def get_by_user(self, user_id: str, include_deleted: bool = False) -> List[RentalComplex]:
         """Get all rentals owned by a specific user."""
@@ -670,6 +674,20 @@ class RentalRepository:
             is_deleted=False
         ).limit(limit).all()
 
+    async def get_user_rentals(self, user_id: str, quick_list: bool = False, limit: int = 10, offset: int = 0) -> Optional[Dict[str, Any]]:
+        try:
+            rentals = await self.model.filter(publisher_id=user_id, is_deleted=False).limit(limit).offset(offset).prefetch_related('rules', 'amenities', 'pricing__fees', 'gallery','publisher','managers')
+            if not rentals:
+                return None
+
+            data = []
+            for rental in rentals:
+                data.append(self._quick_listing_to_dict(rental) if quick_list else self._rental_to_dict(rental))
+            return data
+        except Exception as e:
+            logger.error(f"Error getting rentals for user {user_id}: {str(e)}")
+            raise    
+        
     # Statistics & Analytics
     async def get_user_rental_stats(self, user_id: str) -> Dict[str, Any]:
         """Get rental statistics for a user."""
@@ -765,8 +783,35 @@ class RentalRepository:
             updated_at=datetime.now()
         )
         return updated
-    
-    
+        
+    def _quick_listing_to_dict(self, rental):
+        site_info = settings.SITE
+        category_enum = PropertyCategory(rental.category)
+        return {
+            "id": rental.id,
+            "public_id": rental.public_id,
+            "title": rental.title,
+            "slug": rental.slug,
+            "status":rental.status,
+            "theme_color":rental.theme_color,
+            "category": category_enum.name,
+            "category_id": rental.category,
+            "description": f"{rental.description}"[:100] + "...",
+            "profile_picture": rental.profile_picture if 'https' in  rental.profile_picture else f"{site_info.FILE_READ_API}/{rental.profile_picture}",
+            "bedrooms": rental.bedrooms,
+            "bathrooms": float(rental.bathrooms),
+            "city": rental.city,
+            "state": rental.state,
+            "latitude": rental.latitude,
+            "longitude": rental.longitude,
+            "address": rental.address,
+            "price": float(rental.price) if rental.price else None,
+            "is_available": rental.is_available,
+            "status": rental.status.value,
+            "is_featured": rental.is_featured,
+            "is_verified": rental.is_verified,
+            "created_at": rental.created_at.isoformat() if rental.created_at else None,
+        }
     
     def _rental_to_dict(self, rental):
         site_info = settings.SITE
@@ -921,7 +966,100 @@ class RentalRepository:
         }
 
 
+    def _rental_to_dict_for_edit(self, rental):
+            site_info = settings.SITE
+            category_enum = PropertyCategory(rental.category)
 
+            return {
+                "id": rental.id,
+                "public_id": rental.public_id,
+                "head_info":{
+                    "id": rental.id,
+                    "public_id": rental.public_id,
+                    "status":rental.status,
+                    "title": rental.title,
+                    "slug": rental.slug,
+                    "theme_color": rental.theme_color,
+                    "category": category_enum.name,
+                    "description": rental.description,
+                    "profile_picture": rental.profile_picture if 'https' in  rental.profile_picture else f"{site_info.FILE_READ_API}/{rental.profile_picture}",
+                    "bedrooms": rental.bedrooms,
+                    "bathrooms": float(rental.bathrooms),
+                },
+                "location_info":{
+                    "city": rental.city,
+                    "state": rental.state,
+                    "coordinates": {
+                        "lat": rental.latitude,
+                        "long": rental.longitude,
+                    },
+                    "address": rental.address,
+                },
+                "pricing": (
+                    {
+                        "base_price": rental.pricing,
+                        "extra_fees": [
+                            {
+                                "id": fee.id,
+                                "name": fee.name,
+                                "code": fee.name,
+                                "amount": float(fee.amount) if fee.amount is not None else None,
+                                "is_included": fee.is_included,
+                                "sort_order": fee.sort_order,
+                                "currency": fee.currency,
+                                "description": fee.description,
+                                "icon": fee.icon
+                            }
+                            for fee in (rental.pricing.fees or [])
+                        ],
+                    }
+                    if rental.pricing
+                    else {
+                        "base_price": None,
+                        "extra_fees": [],
+                    }
+                ),
+
+                "amenities": [
+                    {
+                        "id": amenity.id,
+                        "name": amenity.name,
+                        "slug": amenity.slug,
+                        "description": amenity.description,
+                        "sort_order": amenity.sort_order,
+                        "is_featured": amenity.is_featured,
+                        "icon": amenity.icon
+                    } for amenity in rental.amenities
+                ],
+                "gallery": [
+                    {
+                        "url": image.image_url if 'https' in image.image_url else f"{site_info.FILE_READ_API}/{image.image_url}",
+                        "caption": image.title or image.description,
+                        "file_type": image.file_type,
+                        "mime_type": image.mime_type,
+                        "is_primary": image.is_primary
+                    } for image in rental.gallery
+                ],
+                "rules": [
+                    {
+                        "id": rule.id,
+                        "title": rule.title,
+                        "description": rule.description,
+                        "is_mandatory": rule.is_mandatory
+                    } for rule in rental.rules
+                ],
+                "publisher":{
+                            "public_id":rental.publisher.public_id,
+                            "display_name":rental.publisher.display_name,
+                            "profile_picture":rental.publisher.profile_picture,
+                },
+                "managers":{
+                            "public_id":rental.managers.public_id,
+                            "display_name":rental.managers.display_name,
+                            "profile_picture":rental.managers.profile_picture,
+                            }if rental.managers else None,
+            
+            }
 
 # Factory function for dependency injection
 def get_rental_repo() -> RentalRepository:

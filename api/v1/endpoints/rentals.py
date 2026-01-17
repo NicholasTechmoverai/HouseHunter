@@ -481,10 +481,6 @@ async def create_rental(
         )
 
 
-
-
-
-
 # Public endpoint - accessible to everyone, optimized for SEO
 @rental_router.get("/")
 @limiter.limit("5/second")
@@ -555,6 +551,49 @@ async def list_rentals(
         )
 
 
+@rental_router.get("/{public_id}/for-edit")
+@limiter.limit("5/second")
+async def get_rental_for_edit(request: Request, 
+                              public_id: str,
+                              current_user: User = Depends(get_current_user
+                         )):
+    try:
+        rental_repo = get_rental_repo()
+        
+        if not  public_id:
+            raise HTTPException(
+                status_code=404,
+                detail=str(e)
+            )
+            
+        rental = await rental_repo.get_by_public_id(public_id=public_id)
+        if not rental:
+            raise HTTPException(
+                status_code=404,
+                detail="Rental not found"
+            )
+        if rental.publisher_id != current_user.id:
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have permission to edit this rental"
+            )           
+
+
+        
+        return {
+            'success':True,
+            'message':"Rental retrieved successfully",
+            'data':rental_repo._rental_to_dict_for_edit(rental),
+    
+        }
+
+        
+    except Exception as e:
+        logger.error("Unexpected error retrieving rentals", exc_info=e)
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while retrieving rentals"
+        )
 
 
 
