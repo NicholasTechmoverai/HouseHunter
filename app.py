@@ -22,7 +22,8 @@ from api.v1.endpoints.ui_utilities import ui_utilities_router
 from api.v1.endpoints.agent import agent_router
 
 
-from websocket.index import MainNamespace
+from websocket.main import MainNamespace
+from websocket.map import MapNamespace
 
 from core.limiter import limiter
 from core.settings import settings
@@ -136,6 +137,7 @@ sio = socketio.AsyncServer(
 )
 
 sio.register_namespace(MainNamespace("/main"))
+sio.register_namespace(MapNamespace("/map"))
 
 socket_app = socketio.ASGIApp(
     sio,

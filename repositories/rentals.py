@@ -4,7 +4,7 @@ import random
 import re
 from datetime import datetime
 from decimal import Decimal
-from math import cos
+from math import radians, cos, sin, asin, sqrt
 
 from tortoise.exceptions import DoesNotExist, IntegrityError,ValidationError
 from tortoise.expressions import Q
@@ -646,17 +646,77 @@ class RentalRepository:
         self,
         latitude: float,
         longitude: float,
-        radius_km: float = 10,
+        radius_km: float = 10.0,
         limit: int = 20
     ) -> List[RentalComplex]:
-        """Get rentals within a certain radius (simplified)."""
-        # This is a simplified version. In production, you'd use PostGIS or similar
-        return await self.model.filter(
-            is_available=True,
-            is_deleted=False,
-            latitude__isnull=False,
-            longitude__isnull=False
-        ).limit(limit).all()
+        """
+        Retrieve rental complexes within a specified radius of geographic coordinates.
+        
+        Uses the Haversine formula to calculate great-circle distance and filter
+        results. Returns rentals sorted by proximity (nearest first).
+        
+        Args:
+            latitude: Center point latitude in decimal degrees
+            longitude: Center point longitude in decimal degrees
+            radius_km: Search radius in kilometers (default: 10)
+            limit: Maximum number of results to return (default: 20)
+            
+        Returns:
+            List of RentalComplex objects within the specified radius,
+            sorted by distance and limited to `limit` results.
+        """
+        # Fetch available rentals with geographic coordinates
+        rentals = await (
+            self.model.filter(
+                is_available=True,
+                is_deleted=False,
+                latitude__isnull=False,
+                longitude__isnull=False
+            )
+            .prefetch_related(
+                'rules',
+                'amenities',
+                'pricing__fees',
+                'gallery',
+                'publisher',
+                'managers'
+            )
+            .all()
+        )
+        
+        # Calculate distance between two geographic points using Haversine formula
+        def haversine_distance(
+            lat1: float, 
+            lon1: float, 
+            lat2: float, 
+            lon2: float
+        ) -> float:
+            """Return great-circle distance between two points in kilometers."""
+            # Convert decimal degrees to radians
+            lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+            
+            # Haversine formula
+            dlat = lat2 - lat1
+            dlon = lon2 - lon1
+            a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+            c = 2 * asin(sqrt(a))
+            
+            # Earth's radius in kilometers × central angle
+            return 6371.0 * c
+        
+        # Filter rentals within search radius
+        nearby_rentals = [
+            rental for rental in rentals
+            if haversine_distance(latitude, longitude, rental.latitude, rental.longitude) <= radius_km
+        ]
+        
+        # Sort by proximity to center point
+        nearby_rentals.sort(
+            key=lambda r: haversine_distance(latitude, longitude, r.latitude, r.longitude)
+        )
+        
+        # Return limited results
+        return nearby_rentals[:limit]
 
     async def get_featured_rentals(self, limit: int = 10) -> List[RentalComplex]:
         """Get featured rentals."""
@@ -812,6 +872,7 @@ class RentalRepository:
             "is_verified": rental.is_verified,
             "created_at": rental.created_at.isoformat() if rental.created_at else None,
         }
+    
     
     def _rental_to_dict(self, rental):
         site_info = settings.SITE
@@ -1060,6 +1121,31 @@ class RentalRepository:
                             }if rental.managers else None,
             
             }
+
+
+    def _level_2_rental_heatmap_to_dict(self, rental):
+        return {
+            "id": rental.id,
+            "lat": rental.latitude,
+            "long": rental.longitude,
+            "image": rental.profile_picture if 'https' in rental.profile_picture else f"{settings.SITE.FILE_READ_API}/{rental.profile_picture}",
+            "price": float(rental.price) if rental.price else None,
+            "deposit": float(rental.deposit) if getattr(rental, "deposit", None) else None,
+            "title": rental.title,
+            "bedrooms": rental.bedrooms,
+            "area": {
+                "value": rental.area.value if getattr(rental, "area", None) else None,
+                "unit": rental.area.unit if getattr(rental, "area", None) else None,
+                "display": rental.area.display if getattr(rental, "area", None) else None,
+            },
+            "location": f"{rental.city}, {rental.state}" if rental.city and rental.state else rental.address,
+            "amenities": [amenity.name for amenity in getattr(rental, "amenities", [])],
+            "description": getattr(rental, "description", None),
+            "contact": getattr(rental, "contact", None),
+            "available": rental.is_available,
+            "rating": getattr(rental, "rating", 0),
+            "status": rental.status.value if hasattr(rental.status, "value") else rental.status,
+        }
 
 # Factory function for dependency injection
 def get_rental_repo() -> RentalRepository:
