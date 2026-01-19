@@ -6,7 +6,7 @@ from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, ExpiredSignatureError, jwt
 from passlib.context import CryptContext
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from core.settings import settings
 from models.user import User
@@ -97,21 +97,27 @@ class SecurityUtils:
         return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
     @staticmethod
-    def decode_token(token: str) -> TokenData:
+    def decode_token(token: str, verify_exp: bool = True) -> TokenData:
+        """
+        Decode a JWT token.
+        
+        Args:
+            token: The JWT token to decode
+            verify_exp: If True, raises TokenExpiredError for expired tokens.
+                        If False, returns TokenData even for expired tokens.
+        """
         try:
-            
-            # WORKAROUND: Decode WITHOUT validation, then validate manually
-            # This bypasses the jose library's strict validation
+            # Decode WITHOUT validation first
             unverified_payload = jwt.get_unverified_claims(token)
             
-            # Now verify the signature properly
+            # Decode with configurable expiration check
             payload = jwt.decode(
                 token,
                 settings.SECRET_KEY,
                 algorithms=[settings.ALGORITHM],
                 options={
-                    "verify_exp": True,
-                    "verify_sub": False,  # Disable sub validation
+                    "verify_exp": verify_exp,  # <-- Configurable!
+                    "verify_sub": False,
                     "verify_aud": False,
                     "verify_iss": False,
                     "verify_nbf": False,
@@ -120,14 +126,13 @@ class SecurityUtils:
                 }
             )
             
-            
             sub = payload.get("sub")
             exp = payload.get("exp")
             iat = payload.get("iat")
             token_type = payload.get("type", "access")
             scopes = payload.get("scopes", [])
             
-            # Handle the dict sub case (your problematic tokens)
+            # Handle the dict sub case
             if isinstance(sub, dict):
                 user_id = sub.get("user_id")
                 if not user_id:
@@ -141,7 +146,6 @@ class SecurityUtils:
                     scopes=scopes
                 )
             else:
-                # Normal case: sub is a string
                 return TokenData(
                     sub=str(sub),
                     exp=exp,
@@ -151,13 +155,16 @@ class SecurityUtils:
                 )
                 
         except ExpiredSignatureError:
-            logger.warning("Token expired")
-            raise TokenExpiredError()
+            if verify_exp:
+                logger.warning("Token expired and expiration verification enabled")
+                raise TokenExpiredError()
+            else:
+                # Decode again without expiration check
+                logger.warning("Token expired but decoding anyway")
+                return SecurityUtils.decode_token(token, verify_exp=False)
+                
         except (JWTError, ValidationError) as e:
             logger.warning(f"Token validation failed: {e}")
-            # print(f"Full error trace: {type(e).__name__}: {str(e)}")
-            import traceback
-            traceback.print_exc()
             raise UnauthorizedError()
 
 
@@ -228,7 +235,33 @@ class AuthDependencies:
             traceback.print_exc()
             return None
         
+    @staticmethod
+    async def get_optional_current_user_no_expiry_check(
+        credentials: HTTPAuthorizationCredentials = Security(security),
+    ) -> User | None:
+        """
+        Same as get_optional_current_user but doesn't check token expiry.
+        Useful for refresh token endpoints.
+        """
+        if not credentials:
+            return None
+
+        try:
+            token_data = SecurityUtils.decode_token(credentials.credentials, verify_exp=False)
+            
+            if token_data.type != "access":
+                return None
+            
+            user = await User.get_or_none(id=token_data.sub)
+            return user
+
+        except (JWTError, ValidationError) as e:
+            logger.debug(f"Invalid token: {e}")
+            return None
+
         
+            
+            
     @staticmethod
     async def get_current_active_user(user: User = Depends(get_current_user)) -> User:
         if not user.is_active:
@@ -354,6 +387,7 @@ def require_admin_level_dependency(level: int) -> Callable:
 # Export commonly used dependencies for easy import
 get_current_user = AuthDependencies.get_current_user
 get_optional_current_user = AuthDependencies.get_optional_current_user
+get_optional_current_user_no_expiry_check = AuthDependencies.get_optional_current_user_no_expiry_check
 get_current_active_user = AuthDependencies.get_current_active_user
 get_current_superuser = AuthDependencies.get_current_superuser
 get_current_admin = AuthDependencies.get_current_admin

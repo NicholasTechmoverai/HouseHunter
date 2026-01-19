@@ -137,6 +137,8 @@ async def auth_callback(request: Request, code: str, state: str = None):
         user_info = await google_auth.get_user_info(tokens["access_token"])
         
         user_data = await create_or_login_user(user_info, provider="google")
+        user_data.pop("time", None)
+
         
         encoded = base64.urlsafe_b64encode(json.dumps(user_data).encode()).decode()
         params = urlencode({"success": "1", "data": encoded})

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
+from uuid import UUID
 from core.limiter import limiter
 from schemas.request.user import Login as LoginRequest,UserCreate as UserCreateRequest
 from schemas.request.auth import VerificationCodeRequest
@@ -10,6 +11,8 @@ from services.login.index import login_response
 from core.security import SecurityUtils,AuthDependencies
 from core.settings import settings
 from services.login.google_login_services import login_google,auth_callback,GoogleCredentialPayload,handleOneTapLogin
+from core.security import get_optional_current_user_no_expiry_check
+from models.user import User
 
 from core.logger import setup_logger
 logger = setup_logger(__name__)
@@ -57,38 +60,29 @@ async def google_login_callback(request: Request, code: str, state: str = None):
 
     
     
-# @auth_router.post("/refresh")
-# @limiter.limit("5/minute")
-# async def new_token(request: Request, data: RefreshRequest, auth: AuthService = Depends()):
-#     try:
-#         return await auth.renew_token(data.user_id)
-#     except Exception as e:
-#         raise HTTPException(status_code=401, detail=str(e))
-
-# @auth_router.post("/login", response_model=LoginResponse)
-# @limiter.limit("10/minute")
-# async def exchange_token(request: Request, token: LoginRequest):
-#     """Authenticate user and return login response."""
-#     try:
-#         # response = await 
-#         # if not response["success"]:
-#         #     raise HTTPException(
-#         #         status_code=401, 
-#         #         detail=response["message"]
-#         #     )
-                    
-#         # return await login_response(response["user"])
-   
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         logger.error(f"Login error: {str(e)}", exc_info=True)   
-#         raise HTTPException(
-#             status_code=500, 
-#             detail=f"Login error: {str(e)}"
-#         )
 
 
+@auth_router.post("/{public_id}/new-token")
+@limiter.limit("100/minute")
+async def refresh_token(
+    request: Request,
+    public_id: str,
+    current_user: User | None = Depends(get_optional_current_user_no_expiry_check)
+):
+    """
+    Refresh token endpoint: allows expired tokens.
+    """
+    try:
+        if current_user:
+            user = await get_user_repo().to_dict(current_user)
+            return await login_response(user)
+        else:
+            # Handle case where even expired token is invalid
+            raise HTTPException(status_code=401, detail="Invalid token")
+
+    except Exception as e:
+        logger.error(f"Refresh token error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Refresh error: {str(e)}")
 
 @auth_router.post("/login", response_model=LoginResponse)
 @limiter.limit("10/minute")

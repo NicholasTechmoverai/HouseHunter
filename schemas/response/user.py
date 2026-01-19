@@ -17,6 +17,8 @@ class Lv1_Profile(BaseModel):
     email: Optional[EmailStr] = None
     is_email_verified: Optional[bool] = None
     status: Optional[str] = None
+    special_code: List[int]
+    time:Optional[datetime] = None
 
 
 

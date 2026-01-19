@@ -25,7 +25,7 @@ class UserRepository:
     def __init__(self, model=User):
         self.model = model
     
-    async def to_dict(self, user):
+    async def to_dict(self, user:User):
         # Call the instance method of the user
         # return await user.to_dict() 
         return self.model.to_dict(user)
