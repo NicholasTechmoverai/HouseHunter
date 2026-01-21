@@ -3,7 +3,7 @@ from pydantic import BaseModel, field_validator, EmailStr, Field, validator, Htt
 import re
 from typing import Optional, Dict, Any, List
 from decimal import Decimal
-from datetime import date
+from datetime import date,datetime
 
 
 EMAIL_REGEX = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,}$"
@@ -248,86 +248,126 @@ class FileUpload(BaseModel):
 
 
 
+class PhoneNumber(BaseModel):
+    country_code:Optional[str] = None
+    number: Optional[str] = None
+    phone_verified: Optional[bool] = False
+
 
 class EditProfile(BaseModel):
     id: str
     public_id: str
-    
-    email: EmailStr
-    email_verified: bool
-    username: str
+
+    username: Optional[str] = Field(default=None, alias="userName")
     display_name: Optional[str] = None
-    
-    first_name: str
-    last_name: str
+
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     middle_name: Optional[str] = None
     date_of_birth: Optional[date] = None
     gender: Optional[int] = Field(None, ge=0, le=3)
-    
-    phone_number: Optional[str] = None
-    phone_country_code: str
+
+    # Frontend structure
+    phone_number: Optional[PhoneNumber] = None
+
+    # Flat DB fields
+    phone_country_code: Optional[str] = None
     secondary_email: Optional[EmailStr] = None
     secondary_phone: Optional[str] = None
-    
+
     country: Optional[str] = None
     timezone: Optional[str] = None
     locale: Optional[str] = None
     currency: Optional[str] = None
-    
+
     profile_pic: Optional[HttpUrl] = None
     profile_pic_thumbnail: Optional[HttpUrl] = None
     profile_banner: Optional[HttpUrl] = None
     bio: Optional[str] = Field(None, max_length=500)
     tagline: Optional[str] = Field(None, max_length=120)
     website: Optional[HttpUrl] = None
-    
+
     occupation: Optional[str] = None
     company: Optional[str] = None
     job_title: Optional[str] = None
     industry: Optional[str] = None
-    
+
     current_address: Optional[str] = None
     current_city: Optional[str] = None
     current_state: Optional[str] = None
     current_country: Optional[str] = None
     current_postal_code: Optional[str] = None
-    
+
     home_city: Optional[str] = None
     home_country: Optional[str] = None
-    
+
     latitude: Optional[float] = Field(None, ge=-90, le=90)
     longitude: Optional[float] = Field(None, ge=-180, le=180)
-    
+
     id_document_type: Optional[str] = None
     id_document_number: Optional[str] = None
-    
+
     preferences: Dict[str, Any] = Field(default_factory=dict)
     categories_of_interest: List[str] = Field(default_factory=list)
     social_links: Dict[str, HttpUrl] = Field(default_factory=dict)
-    
+
+    # ---------------- Validators ----------------
+
     @validator("phone_number")
     def validate_phone_number(cls, v):
-        if v is not None:
-            digits = ''.join(filter(str.isdigit, v))
-            if len(digits) < 7 or len(digits) > 15:
+        if v and v.number:
+            digits = "".join(filter(str.isdigit, v.number))
+            if not 7 <= len(digits) <= 15:
                 raise ValueError("Phone number must be between 7 and 15 digits")
         return v
-    
-    @validator("date_of_birth")
-    def validate_date_of_birth(cls, v):
-        if v is not None and v > date.today():
-            raise ValueError("Date of birth cannot be in the future")
-        return v
-    
-    def get_update_fields(self) -> Dict[str, Any]:
-        excluded_fields = {"id", "public_id", "email", "email_verified"}
-        update_data = self.dict(exclude=excluded_fields, exclude_none=True)
-        
-        if "date_of_birth" in update_data and isinstance(update_data["date_of_birth"], date):
-            update_data["date_of_birth"] = update_data["date_of_birth"].isoformat()
-        
-        return update_data
 
+
+
+    @validator("date_of_birth", pre=True)
+    def parse_dob(cls, v):
+        if not v:
+            return None
+
+        if isinstance(v, str):
+            try:
+                v = datetime.strptime(v, "%Y-%m-%d").date()
+            except ValueError:
+                raise ValueError("date_of_birth must be in YYYY-MM-DD format")
+        elif not isinstance(v, date):
+            raise ValueError("Invalid type for date_of_birth")
+
+        if v > date.today():
+            raise ValueError("Date of birth cannot be in the future")
+
+        return v
+
+    def get_update_fields(self) -> Dict[str, Any]:
+        """
+        General update fields (non-phone specific)
+        """
+        data = self.dict(
+            exclude_none=True,
+            exclude={"id", "public_id", "phone_number"},
+            by_alias=True
+        )
+
+        if isinstance(data.get("date_of_birth"), date):
+            data["date_of_birth"] = data["date_of_birth"].isoformat()
+
+        return data
+
+    @property
+    def cleaned_data(self) -> Dict[str, Any]:
+        """
+        Final DB-ready payload
+        """
+        data = self.get_update_fields()
+
+        if self.phone_number:
+            data["phone_number"] = self.phone_number.number
+            data["phone_country_code"] = self.phone_number.country_code
+
+        return data
 
 class PartialProfileUpdate(BaseModel):
     display_name: Optional[str] = None

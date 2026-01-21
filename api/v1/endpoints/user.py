@@ -29,7 +29,7 @@ user_router = APIRouter(prefix="/user", tags=["User"])
 
 @user_router.post("/profile")
 @limiter.limit("100/minute")
-async def update_head_info(
+async def get_user_profile(
     request: Request,
     # data: HeadInfoRecord,
     current_user: User = Depends(get_current_user)
@@ -50,6 +50,33 @@ async def update_head_info(
         logger.exception(e)
         raise HTTPException(status_code=400, detail=str(e))
 
+
+
+@user_router.post("/{public_id}/profile")
+@limiter.limit("100/minute")
+async def update_user_profile(
+    request: Request,
+    public_id:str,
+    data: EditProfile,
+    current_user: User = Depends(get_current_user)
+) :
+    try:
+        if current_user.public_id != public_id:
+            raise HTTPException(status_code=400, detail="Unauthorized,Kidly login and try updating your profile!")
+
+        user_repo = get_user_repo()
+        user = await user_repo.update(current_user,data)
+        user = user_repo._to_personal_dict(user)
+
+        return {
+            "success": True,
+            "message": "Profile updated successfully",
+            "data": user
+        }
+
+    except Exception as e:
+        logger.exception(e)
+        raise HTTPException(status_code=400, detail=str(e))
 
 @user_router.post("/{public_id}/listings")
 @limiter.limit("100/minute")
@@ -94,7 +121,7 @@ async def fetch_user_listings(
 
 @user_router.post("/{public_id}")
 @limiter.limit("100/minute")
-async def update_head_info(
+async def get_user_profile_readonly(
     request: Request,
     public_id: str,
     current_user: User = Depends(get_optional_current_user)

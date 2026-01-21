@@ -3,12 +3,13 @@ from uuid import UUID
 from typing import Optional, Dict, Any, List
 from tortoise.exceptions import DoesNotExist
 from tortoise.expressions import Q
-from datetime import datetime
+from datetime import datetime,date
 from core.settings import settings
 from core.logger import setup_logger
 logger = setup_logger(__name__)
-from models.user import User,UserStatus,AccountType
+from models.user import User,UserStatus,AccountType,Gender
 from schemas.response.user import Lv1_Profile, FullProfile
+from schemas.request.user import EditProfile
 
 UNALLOWED_USERNAMES = [
     "saved", "terms", "videos", "live", "notifications",
@@ -222,24 +223,28 @@ class UserRepository:
             logger.error(f"Error creating user: {str(e)}")
             raise
     
-    async def update(self, user: User, data: Dict[str, Any]) -> User:
+    async def update(self, user: User, data: EditProfile) -> User:
         try:
-            update_fields = []
-            
-            for key, value in data.items():
-                if hasattr(user, key) and value is not None:
-                    current_value = getattr(user, key)
+            update_data = data.cleaned_data  # ✅ normalized, DB-ready dict
+            update_fields: list[str] = []
+
+            for field, value in update_data.items():
+                if hasattr(user, field):
+                    current_value = getattr(user, field)
+
                     if current_value != value:
-                        setattr(user, key, value)
-                        update_fields.append(key)
-            
+                        setattr(user, field, value)
+                        update_fields.append(field)
+
             if update_fields:
                 await user.save(update_fields=update_fields)
-            
+
             return user
+
         except Exception as e:
-            logger.error(f"Error updating user {user.id}: {str(e)}")
+            logger.exception(f"Error updating user {user.id}")
             raise
+
     
     async def update_email(self, user: User, new_email: str) -> User:
         try:
@@ -431,7 +436,7 @@ class UserRepository:
             },
             "username": user.username,
             "display_name": user.display_name,
-            "date_of_birth": user.date_of_birth.isoformat() if user.date_of_birth else None,
+            "date_of_birth": self.to_iso(user.date_of_birth),
             "gender": user.gender,
             "phone_number":{
                 "country_code": user.phone_country_code,
@@ -470,3 +475,18 @@ class UserRepository:
             "created_at": user.created_at.isoformat() if user.created_at else None,
         }
         return user
+    
+    def to_iso(self,dob):
+        if not dob:
+            return None
+        # If already a date object
+        if isinstance(dob, date):
+            return dob.isoformat()
+        # If a string, parse it first
+        if isinstance(dob, str):
+            try:
+                return datetime.strptime(dob, "%Y-%m-%d").date().isoformat()
+            except ValueError:
+                # fallback: just return the string if it can't be parsed
+                return dob
+        return None
