@@ -20,6 +20,8 @@ from api.v1.endpoints.user import user_router
 from api.v1.endpoints.rentals import rental_router
 from api.v1.endpoints.ui_utilities import ui_utilities_router
 from api.v1.endpoints.agent import agent_router
+# from api.v1.endpoints.agent import agent_router
+from api.v1.endpoints.admin.use_admin import as_admin_router
 
 
 from websocket.main import MainNamespace
@@ -154,6 +156,7 @@ app.include_router(user_router, prefix=f"/api/{settings.API_VERSION}")
 app.include_router(rental_router, prefix=f"/api/{settings.API_VERSION}")
 app.include_router(ui_utilities_router, prefix=f"/api/{settings.API_VERSION}")
 app.include_router(agent_router, prefix=f"/api/{settings.API_VERSION}")
+app.include_router(as_admin_router, prefix=f"/api/{settings.API_VERSION}")
 
 
 @asynccontextmanager

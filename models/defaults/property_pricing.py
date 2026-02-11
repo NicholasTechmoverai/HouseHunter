@@ -41,6 +41,7 @@ class ExtraFees(Model):
     name = fields.CharField(max_length=100)    # Water, Electricity, Parking
     amount = fields.DecimalField(max_digits=12, decimal_places=2,null=True)
     currency = fields.CharField(max_length=10, default="KES")
+    # description =  fields.CharField(max_length=500) 
     is_included = fields.BooleanField(default=False)
     sort_order = fields.IntField(default=0)
     created_at = fields.DatetimeField(auto_now_add=True)

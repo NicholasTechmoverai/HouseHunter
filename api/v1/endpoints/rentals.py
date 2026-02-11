@@ -41,7 +41,7 @@ rental_router = APIRouter(
 @limiter.limit("100/minute")
 async def update_head_info(
     request: Request,
-    rental_id: UUID,
+    rental_id: str,
     data: HeadInfoRecord,
     current_user: User = Depends(get_current_user)
 ) -> HeadInfoResponse:
@@ -160,7 +160,7 @@ async def update_head_info(
 @limiter.limit("100/minute")
 async def update_location(
     request: Request,
-    rental_id: UUID,
+    rental_id: str,
     data: LocationCreate,
     current_user: User = Depends(get_current_user)
 ):
@@ -202,7 +202,7 @@ async def update_location(
 @limiter.limit("100/minute")
 async def update_pricing(
     request: Request,
-    rental_id: UUID,
+    rental_id: str,
     data: PriceCreate,
     current_user: User = Depends(get_current_user)
 ):
@@ -263,7 +263,7 @@ async def update_pricing(
 @limiter.limit("100/minute")
 async def update_amenities(
     request: Request,
-    rental_id: UUID,
+    rental_id: str,
     amenities: List[AmenityCreate],
     current_user: User = Depends(get_current_user)
 ):
@@ -314,7 +314,7 @@ async def update_amenities(
 @limiter.limit("100/minute")
 async def update_rules(
     request: Request,
-    rental_id: UUID,
+    rental_id: str,
     rules: List[PropertyRuleCreate],
     current_user: User = Depends(get_current_user)
 ):
@@ -356,7 +356,7 @@ async def update_rules(
 @rental_router.post("/{rental_id}/files")
 async def upload_files(
     request: Request,
-    rental_id: UUID,
+    rental_id: str,
     files: List[UploadFile] = File(...),
     current_user: User = Depends(get_current_user)
 ):
@@ -595,11 +595,41 @@ async def get_rental_for_edit(request: Request,
             detail="An unexpected error occurred while retrieving rentals"
         )
 
+@rental_router.get("/slug/{slug}")
+@limiter.limit("5/second")
+async def get_rental_by_slug( request: Request,slug: str):
+    try:
+        rental_repo = get_rental_repo()
+        
+        if not  slug:
+            raise HTTPException(
+                status_code=404,
+                detail=str(e)
+            )
+            
+        rentals = await rental_repo.filter_rentals(slug=slug)
+        rental = rentals[0] if rentals else None
+          
+        
+        return {
+            'success':True,
+            'message':"Rental retrieved successfully",
+            'data':rental,
+    
+        }
+
+        
+    except Exception as e:
+        logger.error("Unexpected error retrieving rentals", exc_info=e)
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while retrieving rentals"
+        )
 
 
 @rental_router.get("/{public_id}")
 @limiter.limit("5/second")
-async def get_rental( request: Request,public_id: str):
+async def get_rental_by_public_id( request: Request,public_id: str):
     try:
         rental_repo = get_rental_repo()
         
@@ -1087,9 +1117,12 @@ async def search_rentals(
     price_min: Optional[Decimal] = None,
     price_max: Optional[Decimal] = None,
     amenities: Optional[List[str]] = Query(None),
+    property_type: Optional[List[str]] = Query(None),
+    land_marks: Optional[List[str]] = Query(None),
     status: Optional[List[str]] = Query(None),
     bedrooms: Optional[int] = None,
     bathrooms: Optional[int] = None,
+    country: Optional[str] = "KE",
     city: Optional[str] = None,
     state: Optional[str] = None,
     page: int = 1,

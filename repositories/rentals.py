@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Any, List, Union
+from typing import Optional, Dict, Any, List, Union,Iterable
 from uuid import UUID
 import random
 import re
@@ -21,7 +21,7 @@ from models.defaults.property_catogories import PropertyCategory
 from tortoise.transactions import in_transaction
 from models.user import User
 from schemas.request.rental import RentalCreate,HeadInfoCreate,LocationCreate,AmenityCreate,PriceCreate,PropertyRuleCreate
-from utils.image_save import save_base64_image
+from utils.image_save import save_base64_image,resolve_image_url
 from core.logger import setup_logger
 logger = setup_logger()
 
@@ -44,7 +44,11 @@ class RentalRepository:
             Raises DoesNotExist if rental not found.
             Raises PermissionError if user is not the owner.
             """
-            rental = await self.model.get_or_none(id=rental_id)
+            if rental_id.startswith('RNT'):
+                rental = await self.model.get_or_none(public_id=rental_id)
+            else:
+                rental = await self.model.get_or_none(id=rental_id)
+
             
             if not rental:
                 raise DoesNotExist(f"Rental with ID {rental_id} not found")
@@ -524,7 +528,8 @@ class RentalRepository:
 
     async def filter_rentals(
         self,
-        public_id: Optional[str] = None,        
+        public_id: Optional[str] = None,      
+        slug: Optional[str] = None,          
         category: Optional[str] = None,
         min_price: Optional[float] = None,
         max_price: Optional[float] = None,
@@ -549,6 +554,9 @@ class RentalRepository:
         
         if public_id:            
             query = query.filter(public_id=public_id)
+
+        if slug:            
+            query = query.filter(slug=slug)    
                     
         if category:            
             category_enum = PropertyCategory[category] 
@@ -857,7 +865,7 @@ class RentalRepository:
             "category": category_enum.name,
             "category_id": rental.category,
             "description": f"{rental.description}"[:100] + "...",
-            "profile_picture": rental.profile_picture if 'https' in  rental.profile_picture else f"{site_info.FILE_READ_API}/{rental.profile_picture}",
+            "profile_picture": resolve_image_url(rental.profile_picture),
             "bedrooms": rental.bedrooms,
             "bathrooms": float(rental.bathrooms),
             "city": rental.city,
@@ -888,7 +896,7 @@ class RentalRepository:
             "category": category_enum.name,
             "category_id": rental.category,
             "description": rental.description,
-            "profile_picture": rental.profile_picture if 'https' in  rental.profile_picture else f"{site_info.FILE_READ_API}/{rental.profile_picture}",
+            "profile_picture":resolve_image_url(rental.profile_picture ),
             "bedrooms": rental.bedrooms,
             "bathrooms": float(rental.bathrooms),
             "city": rental.city,
@@ -937,7 +945,7 @@ class RentalRepository:
             ],
             "gallery": [
                 {
-                    "url": image.image_url if 'https' in image.image_url else f"{site_info.FILE_READ_API}/{image.image_url}",
+                    "url": resolve_image_url(image.image_url),
                     "caption": image.title or image.description,
                     "file_type": image.file_type,
                     "mime_type": image.mime_type,
@@ -964,7 +972,9 @@ class RentalRepository:
                          }if rental.managers else None,
           
         }
+ 
 
+    
 
 
     def _full_rental_to_dict(self, rental):
@@ -981,7 +991,7 @@ class RentalRepository:
             "category": category_enum.name,
             "category_id": rental.category,
             "description": rental.description,
-            "profile_picture": rental.profile_picture if 'https' in  rental.profile_picture else f"{site_info.FILE_READ_API}/{rental.profile_picture}",
+            "profile_picture": resolve_image_url(rental.profile_picture),
             "bedrooms": rental.bedrooms,
             "bathrooms": float(rental.bathrooms),
             "city": rental.city,
@@ -1009,7 +1019,7 @@ class RentalRepository:
             ],
             "gallery": [
                 {
-                    "url": image.image_url if 'https' in image.image_url else f"{site_info.FILE_READ_API}/{image.image_url}",
+                    "url": resolve_image_url(image.image_url),
                     "caption": image.title or image.description,
                     "file_type": image.file_type,
                     "mime_type": image.mime_type,
@@ -1025,102 +1035,187 @@ class RentalRepository:
                 } for rule in rental.rules
             ]
         }
+    
+    def safe_float(self,value) -> Optional[float]:
+        try:
+            return float(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+
+    def safe_list(self,value: Optional[Iterable]):
+        return value or []
+
+
+    def safe_enum_name(self,enum_cls, value, default=None):
+        try:
+            return enum_cls(value).name
+        except Exception:
+            return default
 
 
     def _rental_to_dict_for_edit(self, rental):
-            site_info = settings.SITE
-            category_enum = PropertyCategory(rental.category)
+        category_name = self.safe_enum_name(PropertyCategory, rental.category)
 
-            return {
+        return {
+            "id": rental.id,
+            "public_id": rental.public_id,
+
+            # ---------------- HEAD ----------------
+            "head_info": {
                 "id": rental.id,
                 "public_id": rental.public_id,
-                "head_info":{
-                    "id": rental.id,
-                    "public_id": rental.public_id,
-                    "status":rental.status,
-                    "title": rental.title,
-                    "slug": rental.slug,
-                    "theme_color": rental.theme_color,
-                    "category": category_enum.name,
-                    "description": rental.description,
-                    "profile_picture": rental.profile_picture if 'https' in  rental.profile_picture else f"{site_info.FILE_READ_API}/{rental.profile_picture}",
-                    "bedrooms": rental.bedrooms,
-                    "bathrooms": float(rental.bathrooms),
+                "status": rental.status,
+                "title": rental.title,
+                "slug": rental.slug,
+                "theme_color": rental.theme_color,
+                "category": rental.category,
+                "description": rental.description,
+                "profile_picture": resolve_image_url(rental.profile_picture),
+                "bedrooms": rental.bedrooms,
+                "bathrooms": self.safe_float(rental.bathrooms),
+            },
+
+            # ---------------- LOCATION ----------------
+            "location_info": {
+                "city": rental.city,
+                "state": rental.state,
+                "coordinates": {
+                    "lat": self.safe_float(rental.latitude),
+                    "long": self.safe_float(rental.longitude),
                 },
-                "location_info":{
-                    "city": rental.city,
-                    "state": rental.state,
-                    "coordinates": {
-                        "lat": rental.latitude,
-                        "long": rental.longitude,
-                    },
-                    "address": rental.address,
-                },
-                "pricing": (
-                    {
-                        "base_price": rental.pricing,
-                        "extra_fees": [
-                            {
-                                "id": fee.id,
-                                "name": fee.name,
-                                "code": fee.name,
-                                "amount": float(fee.amount) if fee.amount is not None else None,
-                                "is_included": fee.is_included,
-                                "sort_order": fee.sort_order,
-                                "currency": fee.currency,
-                                "description": fee.description,
-                                "icon": fee.icon
-                            }
-                            for fee in (rental.pricing.fees or [])
-                        ],
-                    }
-                    if rental.pricing
-                    else {
-                        "base_price": None,
-                        "extra_fees": [],
-                    }
+                "address": rental.address,
+            },
+            
+            # ---------------- PRICING ----------------
+        "pricing": {
+                "amount": (
+                    self.safe_float(rental.pricing.rent)
+                    if rental.pricing and rental.pricing.rent is not None
+                    else ""
                 ),
 
-                "amenities": [
+                "period": (
+                    rental.pricing.rent_frequency
+                    if rental.pricing and rental.pricing.rent_frequency
+                    else "monthly"
+                ),
+
+                "currency": (
+                    rental.pricing.currency
+                    if rental.pricing and rental.pricing.currency
+                    else "USD"
+                ),
+
+                "depositAmount": (
+                    self.safe_float(rental.pricing.deposit_amount)
+                    if rental.pricing and rental.pricing.deposit_amount is not None
+                    else ""
+                ),
+
+                 "discount": (
+                    self.safe_float(rental.pricing.discount)
+                    if rental.pricing and rental.pricing.discount is not None
+                    else ""
+                ),
+
+                "depositType": None,
+
+                "isRefundable": bool(
+                    rental.pricing.is_deposit_refundable
+                    if rental.pricing
+                    else False
+                ),
+
+                "minRentPeriod": (
+                    rental.pricing.minimum_lease_months
+                    if rental.pricing and rental.pricing.minimum_lease_months is not None
+                    else 1
+                ),
+
+             
+                "extraFees": [
                     {
-                        "id": amenity.id,
-                        "name": amenity.name,
-                        "slug": amenity.slug,
-                        "description": amenity.description,
-                        "sort_order": amenity.sort_order,
-                        "is_featured": amenity.is_featured,
-                        "icon": amenity.icon
-                    } for amenity in rental.amenities
+                        "id": fee.id,
+                        "name": fee.name,
+                        "code": fee.code or fee.name,
+                        "amount": (
+                            self.safe_float(fee.amount)
+                            if fee.amount is not None
+                            else ""
+                        ),
+                        "currency": fee.currency
+                        or (
+                            rental.pricing.currency
+                            if rental.pricing
+                            else "USD"
+                        ),
+                        "isIncluded": bool(fee.is_included),
+                        "sortOrder": fee.sort_order,
+                    }
+                    for fee in (
+                        rental.pricing.fees
+                        if rental.pricing and rental.pricing.fees
+                        else []
+                    )
                 ],
-                "gallery": [
-                    {
-                        "url": image.image_url if 'https' in image.image_url else f"{site_info.FILE_READ_API}/{image.image_url}",
-                        "caption": image.title or image.description,
-                        "file_type": image.file_type,
-                        "mime_type": image.mime_type,
-                        "is_primary": image.is_primary
-                    } for image in rental.gallery
-                ],
-                "rules": [
-                    {
-                        "id": rule.id,
-                        "title": rule.title,
-                        "description": rule.description,
-                        "is_mandatory": rule.is_mandatory
-                    } for rule in rental.rules
-                ],
-                "publisher":{
-                            "public_id":rental.publisher.public_id,
-                            "display_name":rental.publisher.display_name,
-                            "profile_picture":rental.publisher.profile_picture,
-                },
-                "managers":{
-                            "public_id":rental.managers.public_id,
-                            "display_name":rental.managers.display_name,
-                            "profile_picture":rental.managers.profile_picture,
-                            }if rental.managers else None,
-            
-            }
+            },
+
+            # ---------------- AMENITIES ----------------
+            "amenities": [
+                {
+                    "id": amenity.id,
+                    "name": amenity.name,
+                    "slug": amenity.slug,
+                    "description": amenity.description,
+                    "sort_order": amenity.sort_order,
+                    "is_featured": amenity.is_featured,
+                    "icon": amenity.icon,
+                }
+                for amenity in self.safe_list(rental.amenities)
+            ],
+
+            # ---------------- GALLERY ----------------
+            "gallery": [ resolve_image_url(image.image_url) for image in self.safe_list(rental.gallery)],
+
+            # ---------------- RULES ----------------
+            "rules": [
+                {
+                    "id": rule.id,
+                    "title": rule.title,
+                    "description": rule.description,
+                    "is_mandatory": rule.is_mandatory,
+                }
+                for rule in self.safe_list(rental.rules)
+            ],
+
+            # ---------------- PUBLISHER ----------------
+            "publisher": (
+                {
+                    "public_id": rental.publisher.public_id,
+                    "display_name": rental.publisher.display_name,
+                    "profile_picture": resolve_image_url(
+                        rental.publisher.profile_picture
+                    ),
+                }
+                if rental.publisher
+                else None
+            ),
+
+            # ---------------- MANAGER ----------------
+            "manager": (
+                {
+                    "public_id": rental.managers.public_id,
+                    "display_name": rental.managers.display_name,
+                    "profile_picture": resolve_image_url(
+                        rental.managers.profile_picture
+                    ),
+                }
+                if rental.managers
+                else None
+            ),
+        }
+
 
 
     def _level_2_rental_heatmap_to_dict(self, rental):
@@ -1128,7 +1223,7 @@ class RentalRepository:
             "id": rental.id,
             "lat": rental.latitude,
             "long": rental.longitude,
-            "image": rental.profile_picture if 'https' in rental.profile_picture else f"{settings.SITE.FILE_READ_API}/{rental.profile_picture}",
+            "image": resolve_image_url(rental.profile_picture),
             "price": float(rental.price) if rental.price else None,
             "deposit": float(rental.deposit) if getattr(rental, "deposit", None) else None,
             "title": rental.title,

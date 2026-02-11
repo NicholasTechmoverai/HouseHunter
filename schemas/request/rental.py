@@ -86,9 +86,9 @@ class ExtraFee(BaseModel):
     id: str
     name:str
     code:str
-    is_included:bool
+    is_included:Optional[bool] = False
     description: Optional[str] = None
-    amount:Optional[ Decimal] = None
+    amount: Decimal | str | None = None
 
 
 class PriceCreate(BaseModel):
@@ -108,6 +108,8 @@ class PriceCreate(BaseModel):
     min_rent_period: int = Field(..., alias='minRentPeriod')
 
     utilities_included: bool = Field(False, alias='utilitiesIncluded')
+
+    discount:Optional[Decimal] = None
 
     extra_fees: List[ExtraFee] = Field(default_factory=list, alias='extraFees')
 

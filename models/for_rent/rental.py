@@ -191,7 +191,7 @@ class RentalComplex(Model):
             "public_id": self.public_id,
             "title": self.title,
             "slug": self.slug,
-            "category": self.category.value,
+            "category": self.category,
             "description": self.description,
             "profile_picture": self.profile_picture,
             "theme_color": self.theme_color,

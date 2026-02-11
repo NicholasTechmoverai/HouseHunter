@@ -10,7 +10,7 @@ from core.config import Config
 from typing import Optional, Tuple, List, Dict, Any
 from enum import Enum
 from datetime import datetime
-
+from core.settings import settings
 logger = logging.getLogger(__name__)
 
 
@@ -361,3 +361,17 @@ def delete_file(file_path: str) -> bool:
     except Exception as e:
         logger.error(f"Error deleting file {file_path}: {e}")
         return False
+    
+
+
+
+def resolve_image_url(path: str | None) -> str | None:
+    site_info = settings.SITE
+
+    if not path:
+        return f"{site_info.SITE_URL}/empty_image_placeholder.png"
+
+    if path.startswith(("http://", "https://")):
+        return path
+
+    return f"{site_info.FILE_READ_API}/{path}"

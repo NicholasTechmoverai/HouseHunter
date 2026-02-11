@@ -4,6 +4,7 @@ from tortoise import BaseDBAsyncClient
 async def upgrade(db: BaseDBAsyncClient) -> str:
     return """
         DROP INDEX "idx_users_home_la_0cd7d1";
+        ALTER TABLE "rental_extra_fee" ADD "description" VARCHAR(500) NOT NULL;
         CREATE TABLE IF NOT EXISTS "agents" (
     "created_at" TIMESTAMPTZ NOT NULL  DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ NOT NULL  DEFAULT CURRENT_TIMESTAMP,
@@ -88,5 +89,6 @@ COMMENT ON COLUMN "agents"."verification_status" IS 'UNVERIFIED: unverified\nPEN
 async def downgrade(db: BaseDBAsyncClient) -> str:
     return """
         DROP INDEX "idx_users_home_la_601c51";
+        ALTER TABLE "rental_extra_fee" DROP COLUMN "description";
         DROP TABLE IF EXISTS "agents";
         CREATE INDEX "idx_users_home_la_0cd7d1" ON "users" ("home_latitude", "home_    longitude");"""
