@@ -78,27 +78,32 @@ class UserRepository:
     
     async def exists(self, identifier: str) -> bool:
         try:
-            user = await self.model.get(
-                Q(email=identifier) | 
-                Q(id=identifier) | 
-                Q(username=identifier) |
-                Q(public_id=identifier)
-            )
-            return True
-        except DoesNotExist:
-            return False
+            user = await self.find_user(identifier)
+            return user is not None
         except Exception as e:
             logger.error(f"Error checking if user exists {identifier}: {str(e)}")
             raise
     
     async def find_user(self, identifier: str) -> Optional[User]:
         try:
-            return await self.model.get(
-                Q(email=identifier) | 
-                Q(id=identifier) | 
-                Q(username=identifier) |
-                Q(public_id=identifier)
-            )
+            # 1. Check if email
+            if "@" in identifier:
+                return await self.model.get_or_none(email=identifier.strip().lower())
+            
+            # 2. Check if UUID
+            try:
+                from uuid import UUID
+                UUID(identifier)
+                return await self.model.get_or_none(id=identifier)
+            except ValueError:
+                pass
+            
+            # 3. Check if public_id (starts with USR)
+            if identifier.startswith("USR"):
+                return await self.model.get_or_none(public_id=identifier)
+            
+            # 4. Fallback to username
+            return await self.model.get_or_none(username=identifier)
         except DoesNotExist:
             return None
         except Exception as e:

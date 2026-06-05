@@ -6,6 +6,7 @@ DB_URL = settings.DATABASE_URL
 
 
 MODEL_PATHS = [
+    "models.apartment",
     "models.apartments",
     "models.for_rent",
     "models.universal",

@@ -94,10 +94,10 @@ async def user_login(request: Request, data: LoginRequest):
             password=data.password
         )
         
-        if not response["success"]:
+        if not response or not response["success"]:
             raise HTTPException(
                 status_code=401, 
-                detail=response["message"]
+                detail=response["message"] if response else "Invalid email or password"
             )
                     
         return await login_response(response["user"])
@@ -143,7 +143,7 @@ async def user_register(request: Request, data: UserCreateRequest):
                 detail=user.get("message", "Registration failed")
             )
         
-        return await login_response(user, message="Registration successful")
+        return await login_response(user["user"], message="Registration successful")
         
     except HTTPException:
         raise

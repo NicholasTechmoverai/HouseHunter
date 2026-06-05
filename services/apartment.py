@@ -15,7 +15,7 @@ class ApartmentService:
     async def create_apartment(self, data: ApartmentCreate, owner_id: str) -> Apartment:
         apartment_data = data.dict()
         apartment_data["owner_id"] = owner_id
-        apartment_data["created_by"] = owner_id
+        apartment_data["created_by_id"] = owner_id
         
         # Set initial status
         apartment_data["status"] = ApartmentStatus.PENDING

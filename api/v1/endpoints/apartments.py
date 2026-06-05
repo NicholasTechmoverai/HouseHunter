@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Path, Body, status
 from typing import List, Optional, Dict, Any
 import traceback
 
-from services.apartment_service import ApartmentService
+from services.apartment import ApartmentService
 from repositories.apartment import ApartmentRepository
 from schemas.request.apartment import (
     ApartmentCreate, ApartmentUpdate, ApartmentImageUpload,

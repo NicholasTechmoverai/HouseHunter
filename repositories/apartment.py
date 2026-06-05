@@ -3,8 +3,8 @@ from tortoise.expressions import Q
 from tortoise.expressions import Subquery
 
 from models.apartment import Apartment, ApartmentStatus, ApartmentType
-from schemas.response.apartment import ApartmentDetail, ApartmentSummary
-from core.base_repository import BaseRepository
+from schemas.response.apartment import ApartmentDetail, ApartmentSummary, OwnerInfo, ApartmentImage
+from .base_repository import BaseRepository
 from core.cache import cache_manager
 
 
@@ -68,7 +68,7 @@ class ApartmentRepository(BaseRepository[Apartment, ApartmentDetail]):
         
         # Apply pagination
         apartments = await query.offset(skip).limit(limit).prefetch_related(
-            "owner", "images"
+            "owner"
         ).all()
         
         return apartments, total
@@ -98,7 +98,7 @@ class ApartmentRepository(BaseRepository[Apartment, ApartmentDetail]):
                 Q(city__icontains=query_text)
             )
         
-        return await query.offset(skip).limit(limit).prefetch_related("owner", "images").all()
+        return await query.offset(skip).limit(limit).prefetch_related("owner").all()
     
     async def update_apartment(self, apartment_id: str, data: Dict[str, Any]) -> Apartment:
         apartment = await self.get_by_id(apartment_id)
@@ -196,4 +196,51 @@ class ApartmentRepository(BaseRepository[Apartment, ApartmentDetail]):
             thumbnail=apartment.images[0]["url"] if apartment.images and len(apartment.images) > 0 else None,
             created_at=apartment.created_at,
             updated_at=apartment.updated_at
+        )
+
+    async def to_schema(self, apartment: Apartment) -> ApartmentDetail:
+        owner = await apartment.owner
+        owner_info = OwnerInfo(
+            id=str(owner.id),
+            username=owner.username,
+            display_name=getattr(owner, "display_name", f"{owner.first_name} {owner.last_name}".strip()),
+            profile_pic=getattr(owner, "profile_picture", None),
+            verified=getattr(owner, "is_verified", False)
+        )
+        
+        images = []
+        for img in (apartment.images or []):
+            images.append(ApartmentImage(
+                url=img.get("url"),
+                caption=img.get("caption"),
+                is_primary=img.get("is_primary", False),
+                uploaded_at=img.get("uploaded_at") or apartment.created_at
+            ))
+            
+        return ApartmentDetail(
+            id=str(apartment.id),
+            title=apartment.title,
+            description=apartment.description,
+            price=float(apartment.price),
+            type=apartment.type,
+            bedrooms=apartment.bedrooms,
+            bathrooms=apartment.bathrooms,
+            area=float(apartment.area) if apartment.area else None,
+            address=apartment.address,
+            city=apartment.city,
+            amenities=apartment.amenities or [],
+            latitude=apartment.latitude,
+            longitude=apartment.longitude,
+            status=apartment.status,
+            is_featured=apartment.is_featured,
+            feature_priority=apartment.feature_priority,
+            images=images,
+            owner=owner_info,
+            view_count=apartment.view_count,
+            favorite_count=apartment.favorite_count,
+            created_at=apartment.created_at,
+            updated_at=apartment.updated_at,
+            published_at=apartment.published_at,
+            approved_by=str(apartment.approved_by_id) if apartment.approved_by_id else None,
+            approved_at=apartment.approved_at
         )
