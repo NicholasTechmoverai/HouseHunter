@@ -15,7 +15,7 @@ import re
 #     bathrooms: Decimal = Field(1.0, ge=0, le=50)
 #     area_sqft: Optional[Decimal] = Field(None, ge=0)
 #     price: Optional[Decimal] = Field(None, ge=0)
-    
+
 #     country: str = Field(..., max_length=100)
 #     city: str = Field(..., max_length=100)
 #     state: str = Field(..., max_length=100)
@@ -23,20 +23,20 @@ import re
 #     zip_code: Optional[str] = Field(None, max_length=20)
 #     latitude: Optional[float] = Field(None, ge=-90, le=90)
 #     longitude: Optional[float] = Field(None, ge=-180, le=180)
-    
+
 #     year_built: Optional[int] = Field(None, ge=1800, le=datetime.now().year)
 #     lot_size: Optional[int] = Field(None, ge=0)
 #     floor_number: Optional[int] = Field(None, ge=0)
 #     contact_number: Optional[str] = Field(None, max_length=20)
-    
+
 #     profile_picture: Optional[str] = Field(None, max_length=500)
 #     theme_color: Optional[str] = Field("#FFFFFF", max_length=7)
-    
+
 #     available_from: Optional[datetime] = None
 #     status: RentalStatus = RentalStatus.DRAFT
 
-    
-    
+
+
 # Response models
 class RentalResponse(BaseModel):
     id: str
@@ -55,9 +55,9 @@ class RentalResponse(BaseModel):
 class ListRentalResponse(BaseModel):
     success: bool
     message: str
-    data: List[RentalResponse]
+    data: List[Dict[str, Any]]
     pagination: Optional[Dict[str, Any]] = None
 
 
 
-    
+

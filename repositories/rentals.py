@@ -35,8 +35,8 @@ class RentalRepository:
         """Get rental by its ID."""
         return await self.model.get_or_none(id=rental_id)
     async def get_by_id_with_owner_check(
-        self, 
-        rental_id: str, 
+        self,
+        rental_id: str,
         user_id: str
         ) -> RentalComplex:
             """
@@ -49,19 +49,19 @@ class RentalRepository:
             else:
                 rental = await self.model.get_or_none(id=rental_id)
 
-            
+
             if not rental:
                 raise DoesNotExist(f"Rental with ID {rental_id} not found")
-            
+
             if rental.publisher_id != user_id:
                 raise PermissionError("User is not the owner of this rental")
-            
+
             return rental
 
     async def get_by_slug(self, slug: str) -> Optional[RentalComplex]:
         """Get rental by its slug."""
         return await self.model.get_or_none(slug=slug).prefetch_related('rules', 'amenities', 'pricing__fees', 'gallery','publisher','managers')
-    
+
     async def get_by_public_id(self, public_id: str) -> Optional[RentalComplex]:
         """Get rental by its public ID."""
         return await self.model.get_or_none(public_id=public_id).prefetch_related('rules', 'amenities', 'pricing__fees', 'gallery','publisher','managers')
@@ -80,12 +80,12 @@ class RentalRepository:
     async def check_user_owns_rental(self, user_id: str, rental_id: str) -> bool:
         """Check if user owns a specific rental."""
         return await self.model.filter(id=rental_id, publisher_id=user_id).exists()
-    
+
     async def save_head_info(
-        self, 
-        user_id: str, 
+        self,
+        user_id: str,
         rental_id: str,
-        payload: HeadInfoCreate, 
+        payload: HeadInfoCreate,
         existing_rental: Optional[RentalComplex] = None
     ) -> RentalComplex:
         """
@@ -93,41 +93,41 @@ class RentalRepository:
         Uses existing_rental object if available to avoid extra query.
         """
         rental_data = payload.model_dump(exclude_none=True)
-        
+
         # Handle profile picture
         if rental_data.get('profile_picture'):
             profile_url = await save_base64_image(base64_str=rental_data['profile_picture'],folder='rentals',subfolder='cover')
             rental_data['profile_picture'] = profile_url
-        
+
         rental_data['publisher_id'] = user_id
         # rental_data['category'] = 20
-        
+
         if existing_rental:
             # UPDATE MODE (using existing object)
             # Regenerate slug only if title changed
             if 'title' in rental_data and existing_rental.title != rental_data['title']:
                 base_slug = self.model.generate_slug(rental_data['title'])
                 rental_data['slug'] = await self._generate_unique_slug(
-                    base_slug, 
+                    base_slug,
                     exclude_id=rental_id  # Exclude current rental from slug check
                 )
-            
+
             # Update fields
             for key, value in rental_data.items():
                 setattr(existing_rental, key, value)
-            
+
             await existing_rental.save()
             return existing_rental
-            
+
         else:
             # CREATE MODE
             rental_data['id'] = rental_id
-            
+
             # Generate slug for new rental
             if 'title' in rental_data and not rental_data.get('slug'):
                 base_slug = self.model.generate_slug(rental_data['title'])
                 rental_data['slug'] = await self._generate_unique_slug(base_slug)
-            
+
             try:
                 rental = await self.model.create(**rental_data)
                 return rental
@@ -140,29 +140,29 @@ class RentalRepository:
                 raise e
 
     async def _generate_unique_slug(
-        self, 
-        base_slug: str, 
+        self,
+        base_slug: str,
         exclude_id: Optional[str] = None
     ) -> str:
         """Generate a unique slug, optionally excluding a specific ID."""
         counter = 1
         slug = base_slug
-        
+
         while True:
             query = self.model.filter(slug=slug)
             if exclude_id:
                 query = query.exclude(id=exclude_id)
-            
+
             if not await query.exists():
                 return slug
-            
+
             slug = f"{base_slug}-{counter}"
             counter += 1
 
     async def addGallery(self, gallery_data: dict) -> dict:
         """Add a single gallery item"""
         return await RentalGallery.create(**gallery_data)
-    
+
     async def addGalleryBatch(self, gallery_items: list[dict]) -> list[dict]:
         """Add multiple gallery items at once"""
         created_items = []
@@ -172,57 +172,57 @@ class RentalRepository:
         return created_items
 
     async def save_location_info(
-        self, 
-        user_id: str, 
+        self,
+        user_id: str,
         rental_id: str,
-        payload: HeadInfoCreate, 
+        payload: HeadInfoCreate,
         existing_rental: Optional[RentalComplex] = None
     ) -> dict:
         """Save location info - returns {success, message, data}"""
-        
+
         if not existing_rental:
             return {
                 "success": False,
                 "message": "Rental not found. Create rental first.",
                 "data": None
             }
-        
+
         if str(existing_rental.publisher_id) != user_id:
             return {
                 "success": False,
                 "message": "Permission denied",
                 "data": None
             }
-        
+
         try:
             rental_data = payload.model_dump(exclude_unset=True)
-            
+
             if not rental_data.get('city') or not rental_data.get('address'):
                 return {
                     "success": False,
                     "message": "City and address required",
                     "data": None
                 }
-            
-            coordinates = rental_data.get('coordinates', {}) 
 
-            rental_data['longitude'] = coordinates.get('long')  
-            rental_data['latitude'] = coordinates.get('lat') 
+            coordinates = rental_data.get('coordinates', {})
+
+            rental_data['longitude'] = coordinates.get('long')
+            rental_data['latitude'] = coordinates.get('lat')
 
             location_fields = ['country', 'state', 'city', 'address', 'longitude', 'latitude']
             for field in location_fields:
                 if field in rental_data:
                     setattr(existing_rental, field, rental_data[field])
-            
+
             # existing_rental.location_updated_at = datetime.now()
             await existing_rental.save()
-            
+
             return {
                 "success": True,
                 "message": "Location saved successfully",
                 "data": existing_rental
             }
-            
+
         except Exception as e:
             logger.error(f"Error saving location: {e}")
             return {
@@ -397,10 +397,10 @@ class RentalRepository:
         rental = await self.get_by_id(rental_id)
         if not rental:
             return None
-        
+
         rental.status = status
         rental.updated_at = datetime.now()
-        
+
         # Update availability based on status
         if status in [RentalStatus.VACANT, RentalStatus.RENTED]:
             rental.is_available = False
@@ -408,7 +408,7 @@ class RentalRepository:
             rental.is_available = False
         else:
             rental.is_available = True
-        
+
         await rental.save()
         return rental
 
@@ -417,7 +417,7 @@ class RentalRepository:
         rental = await self.get_by_id(rental_id)
         if not rental:
             return None
-        
+
         rental.is_available = not rental.is_available
         rental.updated_at = datetime.now()
         await rental.save()
@@ -428,7 +428,7 @@ class RentalRepository:
         rental = await self.get_by_id(rental_id)
         if not rental:
             return None
-        
+
         rental.is_featured = not rental.is_featured
         rental.updated_at = datetime.now()
         await rental.save()
@@ -440,12 +440,12 @@ class RentalRepository:
         rental = await self.get_by_id(rental_id)
         if not rental:
             return False
-        
+
         # Check if user is already a manager
         is_manager = await rental.managers.filter(id=user_id).exists()
         if is_manager:
             return True
-        
+
         # Add manager
         await rental.managers.add(user_id)
         return True
@@ -455,12 +455,12 @@ class RentalRepository:
         rental = await self.get_by_id(rental_id)
         if not rental:
             return False
-        
+
         # Check if user is a manager
         is_manager = await rental.managers.filter(id=user_id).exists()
         if not is_manager:
             return True
-        
+
         # Remove manager (can't remove owner)
         if rental.publisher_id != user_id:
             await rental.managers.remove(user_id)
@@ -472,7 +472,7 @@ class RentalRepository:
         rental = await self.get_by_id(rental_id)
         if not rental:
             return []
-        
+
         return await rental.managers.all()
 
     # Delete & Archive Operations
@@ -481,7 +481,7 @@ class RentalRepository:
         rental = await self.get_by_id(rental_id)
         if not rental:
             return False
-        
+
         rental.is_deleted = True
         rental.deleted_at = datetime.now()
         await rental.save()
@@ -492,7 +492,7 @@ class RentalRepository:
         rental = await self.get_by_id(rental_id)
         if not rental:
             return False
-        
+
         await rental.delete()
         return True
 
@@ -501,7 +501,7 @@ class RentalRepository:
         rental = await self.get_by_id(rental_id)
         if not rental or not rental.is_deleted:
             return False
-        
+
         rental.is_deleted = False
         rental.deleted_at = None
         rental.updated_at = datetime.now()
@@ -518,7 +518,7 @@ class RentalRepository:
             Q(city__icontains=query) |
             Q(state__icontains=query)
         )
-        
+
         return await self.model.filter(
             search_query,
             is_available=True,
@@ -528,9 +528,9 @@ class RentalRepository:
 
     async def filter_rentals(
         self,
-        public_id: Optional[str] = None,      
-        slug: Optional[str] = None,          
-        category: Optional[str] = None,
+        public_id: Optional[str] = None,
+        slug: Optional[str] = None,
+        category: Optional[Union[str, List[str]]] = None,
         min_price: Optional[float] = None,
         max_price: Optional[float] = None,
         lat: Optional[Decimal] = None,
@@ -549,50 +549,62 @@ class RentalRepository:
         offset: int = 0,
         sort_by: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        
+
         query = self.model.filter(is_available=True, is_deleted=False)
-        
-        if public_id:            
+
+        if public_id:
             query = query.filter(public_id=public_id)
 
-        if slug:            
-            query = query.filter(slug=slug)    
-                    
-        if category:            
-            category_enum = PropertyCategory[category] 
-            query = query.filter(category=category_enum.value)
-        
+        if slug:
+            query = query.filter(slug=slug)
+
+        if category:
+            categories = category if isinstance(category, list) else [category]
+            category_values = []
+            for value in categories:
+                try:
+                    if isinstance(value, PropertyCategory):
+                        category_values.append(value.value)
+                    elif isinstance(value, int) or str(value).isdigit():
+                        category_values.append(int(value))
+                    else:
+                        category_values.append(PropertyCategory[str(value).upper()].value)
+                except (KeyError, ValueError):
+                    logger.warning(f"Ignoring unknown rental category filter: {value}")
+            if category_values:
+                query = query.filter(category__in=category_values)
+
         if min_price is not None:
             query = query.filter(price__gte=min_price)
-        
+
         if max_price is not None:
             query = query.filter(price__lte=max_price)
-        
+
         if bedrooms is not None:
             query = query.filter(bedrooms=bedrooms)
-        
+
         if bathrooms is not None:
             query = query.filter(bathrooms=bathrooms)
-        
+
         if city:
             query = query.filter(city__iexact=city)
-        
+
         if state:
             query = query.filter(state__iexact=state)
-        
+
         if is_featured is not None:
             query = query.filter(is_featured=is_featured)
-        
+
         if is_verified is not None:
             query = query.filter(is_verified=is_verified)
-        
+
         if status:
-            query = query.filter(status=status)
-        
+            query = query.filter(status__in=status if isinstance(status, list) else [status])
+
         if amenities:
             for amenity in amenities:
                 query = query.filter(amenities__name__iexact=amenity)
-        
+
         if lat is not None and long is not None:
             query = query.filter(
                 latitude__gte=lat - Decimal(radius/111.32),
@@ -600,7 +612,7 @@ class RentalRepository:
                 longitude__gte=long - Decimal(radius/(111.32 * abs(cos(float(lat))))),
                 longitude__lte=long + Decimal(radius/(111.32 * abs(cos(float(lat)))))
             )
-        
+
         if sort_by:
             sort_map = {
                 'price_asc': 'price',
@@ -617,11 +629,11 @@ class RentalRepository:
                 query = query.order_by('-is_featured', '-created_at')
         else:
             query = query.order_by('-is_featured', '-created_at')
-        
+
         query = query.limit(limit).offset(offset)
-        
+
         rentals = await query.prefetch_related('rules', 'amenities', 'pricing__fees', 'gallery','publisher','managers')
-        
+
         data = []
         for rental in rentals:
             data.append(self._rental_to_dict(rental))
@@ -629,7 +641,7 @@ class RentalRepository:
 
     async def list_public_rentals(self, limit: int = 20, offset: int = 0):
         """Get public rentals that are available and not deleted."""
-        
+
         try:
             # Use prefetch_related to fetch everything in one query
             rentals = await self.model.filter(
@@ -637,18 +649,119 @@ class RentalRepository:
                 is_deleted=False
             ).prefetch_related('rules', 'amenities', 'pricing__fees', 'gallery','publisher','managers') \
             .limit(limit).offset(offset)
-            
-            print(f"Found {len(rentals)} rentals")
+
             data = []
             for rental in rentals:
                 data.append(self._rental_to_dict(rental))
             return data
-            
+
         except Exception as e:
-            print(f"Error in list_public_rentals: {e}")
-            # Return empty list on error, or handle as needed
-            return []
-        
+            logger.error(f"Error in list_public_rentals: {e}", exc_info=True)
+            raise
+
+    async def list_public_featured_rentals(self, page: int = 1, limit: int = 10):
+        offset = (page - 1) * limit
+        return await self.filter_rentals(
+            is_featured=True,
+            is_verified=True,
+            limit=limit,
+            offset=offset,
+            sort_by="featured",
+        )
+
+    async def list_personalized_featured_rentals(
+        self,
+        user_id: str,
+        page: int = 1,
+        limit: int = 10
+    ):
+        # Preference modelling can evolve here; verified featured inventory is the safe default.
+        return await self.list_public_featured_rentals(page=page, limit=limit)
+
+    async def get_featured_rental_count(self, user_id: Optional[str] = None) -> int:
+        return await self.model.filter(
+            is_featured=True,
+            is_verified=True,
+            is_available=True,
+            is_deleted=False,
+        ).count()
+
+    async def list_personalized_rentals(
+        self,
+        user_id: str,
+        page: int = 1,
+        limit: int = 20,
+        filters: Optional[Any] = None
+    ):
+        offset = (page - 1) * limit
+        return await self.filter_rentals(
+            is_verified=True,
+            limit=limit,
+            offset=offset,
+            sort_by="featured",
+        )
+
+    async def get_personalized_rental_count(
+        self,
+        user_id: str,
+        filters: Optional[Any] = None
+    ) -> int:
+        return await self.model.filter(
+            is_verified=True,
+            is_available=True,
+            is_deleted=False,
+        ).count()
+
+    async def list_interactive_rentals(self, user_id: str, page: int = 1, limit: int = 10):
+        offset = (page - 1) * limit
+        return await self.filter_rentals(
+            is_verified=True,
+            limit=limit,
+            offset=offset,
+            sort_by="newest",
+        )
+
+    async def get_interactive_rental_count(self, user_id: str) -> int:
+        return await self.model.filter(
+            is_verified=True,
+            is_available=True,
+            is_deleted=False,
+        ).count()
+
+    async def get_location_suggestions(self, q: str, limit: int = 10) -> List[str]:
+        rentals = await self.model.filter(
+            Q(city__icontains=q) | Q(state__icontains=q) | Q(address__icontains=q),
+            is_deleted=False,
+        ).limit(limit * 2).all()
+        suggestions = []
+        for rental in rentals:
+            for value in [rental.city, rental.state, rental.address]:
+                if value and value not in suggestions:
+                    suggestions.append(value)
+                if len(suggestions) >= limit:
+                    return suggestions
+        return suggestions
+
+    async def get_category_suggestions(self, q: str, limit: int = 10) -> List[str]:
+        q_lower = q.lower()
+        return [
+            category.name
+            for category in PropertyCategory
+            if q_lower in category.name.lower()
+        ][:limit]
+
+    async def get_amenity_suggestions(self, q: str, limit: int = 10) -> List[str]:
+        amenities = await RentalAmenity.filter(
+            name__icontains=q
+        ).limit(limit * 2).all()
+        suggestions = []
+        for amenity in amenities:
+            if amenity.name and amenity.name not in suggestions:
+                suggestions.append(amenity.name)
+            if len(suggestions) >= limit:
+                break
+        return suggestions
+
 
     async def get_nearby_rentals(
         self,
@@ -659,16 +772,16 @@ class RentalRepository:
     ) -> List[RentalComplex]:
         """
         Retrieve rental complexes within a specified radius of geographic coordinates.
-        
+
         Uses the Haversine formula to calculate great-circle distance and filter
         results. Returns rentals sorted by proximity (nearest first).
-        
+
         Args:
             latitude: Center point latitude in decimal degrees
             longitude: Center point longitude in decimal degrees
             radius_km: Search radius in kilometers (default: 10)
             limit: Maximum number of results to return (default: 20)
-            
+
         Returns:
             List of RentalComplex objects within the specified radius,
             sorted by distance and limited to `limit` results.
@@ -691,38 +804,38 @@ class RentalRepository:
             )
             .all()
         )
-        
+
         # Calculate distance between two geographic points using Haversine formula
         def haversine_distance(
-            lat1: float, 
-            lon1: float, 
-            lat2: float, 
+            lat1: float,
+            lon1: float,
+            lat2: float,
             lon2: float
         ) -> float:
             """Return great-circle distance between two points in kilometers."""
             # Convert decimal degrees to radians
             lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
-            
+
             # Haversine formula
             dlat = lat2 - lat1
             dlon = lon2 - lon1
             a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
             c = 2 * asin(sqrt(a))
-            
+
             # Earth's radius in kilometers × central angle
             return 6371.0 * c
-        
+
         # Filter rentals within search radius
         nearby_rentals = [
             rental for rental in rentals
             if haversine_distance(latitude, longitude, rental.latitude, rental.longitude) <= radius_km
         ]
-        
+
         # Sort by proximity to center point
         nearby_rentals.sort(
             key=lambda r: haversine_distance(latitude, longitude, r.latitude, r.longitude)
         )
-        
+
         # Return limited results
         return nearby_rentals[:limit]
 
@@ -754,8 +867,8 @@ class RentalRepository:
             return data
         except Exception as e:
             logger.error(f"Error getting rentals for user {user_id}: {str(e)}")
-            raise    
-        
+            raise
+
     # Statistics & Analytics
     async def get_user_rental_stats(self, user_id: str) -> Dict[str, Any]:
         """Get rental statistics for a user."""
@@ -764,7 +877,7 @@ class RentalRepository:
         rented = await self.model.filter(publisher_id=user_id, status=RentalStatus.RENTED, is_deleted=False).count()
         featured = await self.model.filter(publisher_id=user_id, is_featured=True, is_deleted=False).count()
         verified = await self.model.filter(publisher_id=user_id, is_verified=True, is_deleted=False).count()
-        
+
         return {
             "total_rentals": total,
             "available_rentals": available,
@@ -791,7 +904,7 @@ class RentalRepository:
         rental = await self.get_by_id(rental_id)
         if not rental:
             return None
-        
+
         rental.is_verified = True
         rental.verified_by_id = admin_user_id
         rental.verified_at = datetime.now()
@@ -803,7 +916,7 @@ class RentalRepository:
         rental = await self.get_by_id(rental_id)
         if not rental:
             return None
-        
+
         rental.is_verified = False
         rental.verified_by_id = None
         rental.verified_at = None
@@ -815,7 +928,7 @@ class RentalRepository:
         rental = await self.get_by_id(rental_id)
         if not rental:
             return None
-        
+
         rental.is_verified = False
         rental.rejection_reason = reason
         rental.verified_at = None
@@ -851,7 +964,7 @@ class RentalRepository:
             updated_at=datetime.now()
         )
         return updated
-        
+
     def _quick_listing_to_dict(self, rental):
         site_info = settings.SITE
         category_enum = PropertyCategory(rental.category)
@@ -880,8 +993,51 @@ class RentalRepository:
             "is_verified": rental.is_verified,
             "created_at": rental.created_at.isoformat() if rental.created_at else None,
         }
-    
-    
+
+    def _pricing_to_dict(self, pricing):
+        if not pricing:
+            return {
+                "base_price": None,
+                "extra_fees": [],
+            }
+
+        return {
+            "id": str(pricing.id),
+            "base_price": float(pricing.rent) if pricing.rent is not None else None,
+            "rent_frequency": pricing.rent_frequency.value if hasattr(pricing.rent_frequency, "value") else pricing.rent_frequency,
+            "currency": pricing.currency,
+            "deposit_amount": float(pricing.deposit_amount) if pricing.deposit_amount is not None else None,
+            "minimum_lease_months": pricing.minimum_lease_months,
+            "is_deposit_refundable": pricing.is_deposit_refundable,
+            "discount": float(pricing.discount) if pricing.discount is not None else None,
+            "extra_fees": [
+                {
+                    "id": str(fee.id),
+                    "code": fee.code,
+                    "name": fee.name,
+                    "amount": float(fee.amount) if fee.amount is not None else None,
+                    "is_included": fee.is_included,
+                    "sort_order": fee.sort_order,
+                    "currency": fee.currency,
+                }
+                for fee in self.safe_list(getattr(pricing, "fees", []))
+            ],
+        }
+
+    def _user_summary_to_dict(self, user):
+        if not user:
+            return None
+
+        return {
+            "public_id": user.public_id,
+            "display_name": user.display_name,
+            "profile_picture": resolve_image_url(user.profile_picture),
+        }
+
+    def _managers_to_list(self, managers):
+        return [self._user_summary_to_dict(manager) for manager in self.safe_list(managers)]
+
+
     def _rental_to_dict(self, rental):
         site_info = settings.SITE
         category_enum = PropertyCategory(rental.category)
@@ -910,27 +1066,7 @@ class RentalRepository:
             "is_featured": rental.is_featured,
             "is_verified": rental.is_verified,
             "created_at": rental.created_at.isoformat() if rental.created_at else None,
-            "pricing": (
-                {
-                    "base_price": rental.pricing,
-                    "extra_fees": [
-                        {
-                            "id": fee.id,
-                            "name": fee.name,
-                            "amount": float(fee.amount) if fee.amount is not None else None,
-                            "is_included": fee.is_included,
-                            "sort_order": fee.sort_order,
-                            "currency": fee.currency,
-                        }
-                        for fee in (rental.pricing.fees or [])
-                    ],
-                }
-                if rental.pricing
-                else {
-                    "base_price": None,
-                    "extra_fees": [],
-                }
-            ),
+            "pricing": self._pricing_to_dict(rental.pricing),
 
             "amenities": [
                 {
@@ -960,21 +1096,13 @@ class RentalRepository:
                     "is_mandatory": rule.is_mandatory
                 } for rule in rental.rules
             ],
-              "publisher":{
-                         "public_id":rental.publisher.public_id,
-                         "display_name":rental.publisher.display_name,
-                         "profile_picture":rental.publisher.profile_picture,
-            },
-            "managers":{
-                         "public_id":rental.managers.public_id,
-                         "display_name":rental.managers.display_name,
-                         "profile_picture":rental.managers.profile_picture,
-                         }if rental.managers else None,
-          
-        }
- 
+            "publisher": self._user_summary_to_dict(rental.publisher),
+            "managers": self._managers_to_list(rental.managers),
 
-    
+        }
+
+
+
 
 
     def _full_rental_to_dict(self, rental):
@@ -1035,7 +1163,7 @@ class RentalRepository:
                 } for rule in rental.rules
             ]
         }
-    
+
     def safe_float(self,value) -> Optional[float]:
         try:
             return float(value) if value is not None else None
@@ -1086,7 +1214,7 @@ class RentalRepository:
                 },
                 "address": rental.address,
             },
-            
+
             # ---------------- PRICING ----------------
         "pricing": {
                 "amount": (
@@ -1133,7 +1261,7 @@ class RentalRepository:
                     else 1
                 ),
 
-             
+
                 "extraFees": [
                     {
                         "id": fee.id,
@@ -1203,17 +1331,7 @@ class RentalRepository:
             ),
 
             # ---------------- MANAGER ----------------
-            "manager": (
-                {
-                    "public_id": rental.managers.public_id,
-                    "display_name": rental.managers.display_name,
-                    "profile_picture": resolve_image_url(
-                        rental.managers.profile_picture
-                    ),
-                }
-                if rental.managers
-                else None
-            ),
+            "managers": self._managers_to_list(rental.managers),
         }
 
 

@@ -1,5 +1,5 @@
 from typing import List
-from pydantic import AnyHttpUrl, AnyUrl, Field
+from pydantic import AnyHttpUrl, AnyUrl, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,7 +37,12 @@ class Settings(BaseSettings):
     #     "https://www.househunter.tera-in.top",
     #     "https://api.tera-in.top",  # Add this if needed
     # ]
-    ALLOWED_ORIGINS: List[str] = ["*"]
+    ALLOWED_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "https://househunter.tera-in.top",
+        "https://www.househunter.tera-in.top",
+    ]
 
     ALLOWED_METHODS: List[str] = [
         "GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"
@@ -77,7 +82,7 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str | None = "mysql://root:root@localhost/house_hunter"
     REDIS_URL: str | None ="redis://localhost:6379/0"
- 
+
 
     SITE: SiteInfo = SiteInfo()
 
@@ -106,6 +111,15 @@ class Settings(BaseSettings):
 
     CACHE_ENABLED: bool = True
     CACHE_DEFAULT_TTL: int = 300
+
+    @field_validator("ALLOWED_ORIGINS", mode="before")
+    @classmethod
+    def parse_allowed_origins(cls, value):
+        if isinstance(value, str):
+            if value.strip() == "*":
+                return ["*"]
+            return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value
 
     model_config = SettingsConfigDict(
         env_file=".env",

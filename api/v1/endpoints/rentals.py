@@ -4,12 +4,12 @@ from uuid import UUID
 from datetime import datetime
 from core.limiter import limiter
 from schemas.request.rental import (
-    HeadInfoCreate, 
+    HeadInfoCreate,
     HeadInfoRecord,
     HeadInfoResponse,
-    LocationCreate, 
-    PriceCreate, 
-    AmenityCreate, 
+    LocationCreate,
+    PriceCreate,
+    AmenityCreate,
     PropertyRuleCreate,
     RentalCreate,
     FileUploadResponse,
@@ -31,6 +31,19 @@ from services.search_service import get_query_parser
 from decimal import Decimal
 
 logger = setup_logger(__name__)
+MAX_RENTAL_UPLOADS_PER_REQUEST = 40
+MAX_RENTAL_UPLOAD_SIZE_MB = 50
+ALLOWED_RENTAL_UPLOAD_TYPES = {
+    'image/jpeg',
+    'image/jpg',
+    'image/png',
+    'image/webp',
+    'video/mp4',
+    'video/webm',
+    'video/ogg',
+    'video/quicktime',
+    'application/pdf',
+}
 
 rental_router = APIRouter(
     prefix="/rental",
@@ -47,12 +60,12 @@ async def update_head_info(
 ) -> HeadInfoResponse:
     try:
         rental_repo = get_rental_repo()
-        
+
         rental = await rental_repo.get_by_id_with_owner_check(
             rental_id=str(rental_id),
             user_id=current_user.id
         )
-        
+
         updated_rental = await rental_repo.save_head_info(
             user_id=current_user.id,
             rental_id=str(rental_id),
@@ -60,23 +73,23 @@ async def update_head_info(
             existing_rental=rental
         )
         updated_rental = await updated_rental.to_dict()
-        
+
         # print("RENTAL",updated_rental)
 
-        
+
         logger.info(
             f"Updated head info for rental {rental_id}",
             extra={
                 "rental_id": str(rental_id),
             }
         )
-        
+
         return HeadInfoResponse(
             data=updated_rental,
             message="Head information updated successfully",
             success=True
         )
-        
+
     except DoesNotExist:
         updated_rental = await rental_repo.save_head_info(
             user_id=current_user.id,
@@ -84,9 +97,9 @@ async def update_head_info(
             payload=data.data,
             existing_rental=None
         )
-        
+
         updated_rental = await updated_rental.to_dict()
-        
+
         logger.info(
             f"Created head info for new rental {rental_id}",
             extra={
@@ -94,19 +107,19 @@ async def update_head_info(
                 "user_id": current_user.id
             }
         )
-        
+
         return HeadInfoResponse(
             data=updated_rental,
             message="Head information created successfully",
             success=True
         )
-        
+
     except PermissionError:
         raise HTTPException(
-            status_code=403, 
+            status_code=403,
             detail="You don't have permission to update this rental"
         )
-        
+
     except ValidationError as ve:
         logger.warning(
             f"Validation error updating head info for rental {rental_id}",
@@ -119,14 +132,14 @@ async def update_head_info(
                 "errors": ve.errors()
             }
         )
-        
+
     except IntegrityError as e:
         logger.error(
             f"Integrity error updating head info for rental {rental_id}",
             exc_info=e,
             extra={"rental_id": str(rental_id)}
         )
-        
+
         error_msg = str(e).lower()
         if 'slug' in error_msg or 'unique' in error_msg:
             raise HTTPException(
@@ -143,7 +156,7 @@ async def update_head_info(
                 status_code=400,
                 detail="Database constraint violation. Please check your input data."
             )
-            
+
     except Exception as e:
         logger.error(
             f"Unexpected error updating head info for rental {rental_id}",
@@ -154,8 +167,8 @@ async def update_head_info(
             status_code=500,
             detail="An unexpected error occurred while updating head information. Please try again later."
         )
-        
-             
+
+
 @rental_router.post("/{rental_id}/location")
 @limiter.limit("100/minute")
 async def update_location(
@@ -166,18 +179,18 @@ async def update_location(
 ):
     """Update rental location endpoint"""
     try:
-    
+
         rental_repo = get_rental_repo()
-        
+
         rental = await rental_repo.get_by_id_with_owner_check(
             rental_id=str(rental_id),
             user_id=current_user.id
         )
-        
 
-        if not rental:  
+
+        if not rental:
             raise HTTPException(status_code=404, detail="Rental not found")
-        
+
         # Save location
         result = await rental_repo.save_location_info(
             user_id=str(current_user.id),
@@ -185,19 +198,19 @@ async def update_location(
             payload=data,
             existing_rental=rental
         )
-        
+
         # Check result
         if not result["success"]:
             raise HTTPException(status_code=400, detail=result["message"])
-        
+
         return {
             "success": True,
             "message": result["message"],
             # "data": result["data"].get_location_summary()
         }
     except Exception as err:
-        logger.exception(err)    
-        
+        logger.exception(err)
+
 @rental_router.post("/{rental_id}/pricing")
 @limiter.limit("100/minute")
 async def update_pricing(
@@ -209,24 +222,24 @@ async def update_pricing(
     """Update rental pricing information."""
     try:
         rental_repo = get_rental_repo()
-           
+
         rental = await rental_repo.get_by_id_with_owner_check(
             rental_id=str(rental_id),
             user_id=current_user.id
         )
-        
 
-        if not rental:  
+
+        if not rental:
             raise HTTPException(status_code=404, detail="Rental not found")
-        
+
         # Update pricing
         updated_pricing = await rental_repo.save_pricing(
             rental_id=str(rental_id),
             payload=data,
             existing_rental=rental
         )
-        
-        
+
+
         logger.info(f"Updated pricing for rental {rental_id}", extra={
             "user_id": current_user.id,
             "amount": data.amount,
@@ -237,8 +250,8 @@ async def update_pricing(
                 status_code=500,
                 detail="An unexpected error occurred while updating pricing"
             )
-                
-        
+
+
         return {
             "success": True,
             "message": "Pricing information updated successfully",
@@ -270,27 +283,27 @@ async def update_amenities(
     """Update rental amenities."""
     try:
         rental_repo = get_rental_repo()
-        
+
         rental = await rental_repo.get_by_id_with_owner_check(
             rental_id=str(rental_id),
             user_id=current_user.id
         )
-        
 
-        if not rental:  
+
+        if not rental:
             raise HTTPException(status_code=404, detail="Rental not found")
-        
+
         # Update amenities
         response = await rental_repo.save_amenities(
             rental_id=str(rental_id),
             payload=amenities,
             existing_rental=rental
         )
-        
+
         if not response.get('success'):
             raise HTTPException(status_code=500, detail=response.get('message') )
-        
-        
+
+
         return {
             "success": True,
             "message": f"Updated {len(amenities)} amenities successfully",
@@ -321,23 +334,23 @@ async def update_rules(
     """Update rental rules."""
     try:
         rental_repo = get_rental_repo()
-        
+
         # Check permission
         rental = await rental_repo.get_by_id_with_owner_check(
             rental_id=str(rental_id),
             user_id=current_user.id
         )
-        
+
         response = await rental_repo.save_rules(
             rental_id=str(rental_id),
             payload=rules,
             existing_rental=rental
         )
-        
+
         if not response.get('success'):
             raise HTTPException(status_code=500, detail=response.get('message') )
-        
-        
+
+
         return {
             "success": True,
             "message": f"Updated rules successfully",
@@ -367,75 +380,77 @@ async def upload_files(
             rental_id=str(rental_id),
             user_id=current_user.id
         )
-        
 
-        if not rental:  
+
+        if not rental:
             raise HTTPException(status_code=404, detail="Rental not found")
-        
-        
-        if len(files) > 40:
-            raise HTTPException(status_code=400, detail="Maximum 20 files allowed per upload")
-        
-        uploaded_files = []
+
+
+        if len(files) > MAX_RENTAL_UPLOADS_PER_REQUEST:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Maximum {MAX_RENTAL_UPLOADS_PER_REQUEST} files allowed per upload"
+            )
+
         for file in files:
             file.file.seek(0, 2)  # Seek to end
             file_size = file.file.tell()
             file.file.seek(0)  # Reset pointer
-            
-            if file_size > 50 * 1024 * 1024:  # 50MB
+
+            if file_size > MAX_RENTAL_UPLOAD_SIZE_MB * 1024 * 1024:
                 raise HTTPException(
-                    status_code=400, 
-                    detail=f"File {file.filename} exceeds 10MB limit"
+                    status_code=400,
+                    detail=f"File {file.filename} exceeds {MAX_RENTAL_UPLOAD_SIZE_MB}MB limit"
                 )
-            
-            allowed_types = ['image/jpeg', 'image/jpg','image/png', 'image/webp',  'video/mp4','video/webm','video/ogg',
-            'video/quicktime''application/pdf']
-            
-            if file.content_type not in allowed_types:
+
+            if file.content_type not in ALLOWED_RENTAL_UPLOAD_TYPES:
                 raise HTTPException(
                     status_code=400,
                     detail=f"File type {file.content_type} not allowed"
                 )
-            
-      
-            results = await save_files_batch(
-                files=files,
-                folder="rentals",
-                subfolder=f"{rental_id}",
-                file_type="form"
+
+        results = await save_files_batch(
+            files=files,
+            folder="rentals",
+            subfolder=f"{rental_id}",
+            file_type="form",
+            max_size_mb=MAX_RENTAL_UPLOAD_SIZE_MB,
+        )
+
+        successful_results = [r for r in results if r.success]
+        if not successful_results:
+            failed = [r.error_message for r in results if r.error_message]
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "No files were uploaded successfully",
+                    "errors": failed,
+                }
             )
-            
-            # Filter successful uploads
-            successful_results = [r for r in results if r.success]
-            
-            # Convert to database format
-            db_data = save_files_batch_sync(
-                files=successful_results,
-                rental_id=rental_id,
-                user_id=current_user.id
+
+        db_data = save_files_batch_sync(
+            files=successful_results,
+            rental_id=rental_id,
+            user_id=current_user.id
+        )
+
+        try:
+            created_gallery_items = await rental_repo.addGalleryBatch(db_data)
+            return {
+                "success": True,
+                "message": f"Uploaded {len(created_gallery_items)} files successfully",
+                "data": {
+                    "count": len(created_gallery_items),
+                    "failed_count": len(results) - len(successful_results),
+                    "files": [item.to_dict() for item in successful_results],
+                }
+            }
+        except Exception as err:
+            logger.exception(err)
+            raise HTTPException(
+                status_code=500,
+                detail="An unexpected error occurred while uploading files"
             )
-            
-            try:
-                res =await get_rental_repo().addGalleryBatch(db_data)
-                if res:
-                    return {
-                        "success": True,
-                        "message": f"Uploaded {len(uploaded_files)} files successfully",
-                        "data": {
-                            "count": len(uploaded_files)
-                        }
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "message": f"Failed  uploadin {len(uploaded_files)} files ",
-                    }
-            except Exception as err:
-                logger.exception(err)
-                raise HTTPException(
-                    status_code=500,
-                    detail="An unexpected error occurred while uploading files"
-                )
 
     except HTTPException:
         raise
@@ -457,8 +472,8 @@ async def create_rental(
     """Create a new rental listing."""
     try:
         rental_repo = get_rental_repo()
-        
-        
+
+
         return {
             "success": True,
             "message": "Rental created successfully",
@@ -472,7 +487,7 @@ async def create_rental(
     except ValueError as e:
         logger.warning(f"Validation error creating rental: {e}")
         raise HTTPException(status_code=400, detail=str(e))
-        
+
     except Exception as e:
         logger.error("Unexpected error creating rental", exc_info=e)
         raise HTTPException(
@@ -504,26 +519,35 @@ async def list_rentals(
 ) :
     """
     Get all rentals (public endpoint).
-    
+
     This endpoint is accessible to everyone and optimized for SEO.
     Returns a paginated list of rental properties.
     """
     try:
         rental_repo = get_rental_repo()
-        
-        if category:
-            rentals = await rental_repo.filter_rentals(category=category)
-          
-        else:  
-            rentals = await rental_repo.list_public_rentals(
-                offset=page,
-                limit=limit,
-            )
-            
+
+        offset = (page - 1) * limit
+        rentals = await rental_repo.filter_rentals(
+            category=category,
+            min_price=min_price,
+            max_price=max_price,
+            lat=lat,
+            long=long,
+            radius=radius,
+            deposit=deposit,
+            bedrooms=bedrooms,
+            bathrooms=bathrooms,
+            city=city,
+            state=state,
+            amenities=amenities,
+            offset=offset,
+            limit=limit,
+        )
+
         total_count = len(rentals)
-        
+
         # print(f"Found data :", rentals)
-        
+
         return {
             'success':True,
             'message':"Rentals retrieved successfully",
@@ -532,7 +556,7 @@ async def list_rentals(
                 "page": page,
                 "limit": limit,
                 "total": total_count,
-                "pages": (total_count + limit - 1) 
+                "pages": (total_count + limit - 1) // limit if limit else 1
             }
         }
 
@@ -542,7 +566,8 @@ async def list_rentals(
             status_code=400,
             detail=str(e)
         )
-        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Unexpected error retrieving rentals", exc_info=e)
         raise HTTPException(
@@ -553,19 +578,16 @@ async def list_rentals(
 
 @rental_router.get("/{public_id}/for-edit")
 @limiter.limit("5/second")
-async def get_rental_for_edit(request: Request, 
+async def get_rental_for_edit(request: Request,
                               public_id: str,
                               current_user: User = Depends(get_current_user
                          )):
     try:
         rental_repo = get_rental_repo()
-        
+
         if not  public_id:
-            raise HTTPException(
-                status_code=404,
-                detail=str(e)
-            )
-            
+            raise HTTPException(status_code=404, detail="Rental ID is required")
+
         rental = await rental_repo.get_by_public_id(public_id=public_id)
         if not rental:
             raise HTTPException(
@@ -576,18 +598,19 @@ async def get_rental_for_edit(request: Request,
             raise HTTPException(
                 status_code=403,
                 detail="You do not have permission to edit this rental"
-            )           
+            )
 
 
-        
+
         return {
             'success':True,
             'message':"Rental retrieved successfully",
             'data':rental_repo._rental_to_dict_for_edit(rental),
-    
+
         }
 
-        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Unexpected error retrieving rentals", exc_info=e)
         raise HTTPException(
@@ -600,65 +623,31 @@ async def get_rental_for_edit(request: Request,
 async def get_rental_by_slug( request: Request,slug: str):
     try:
         rental_repo = get_rental_repo()
-        
+
         if not  slug:
-            raise HTTPException(
-                status_code=404,
-                detail=str(e)
-            )
-            
+            raise HTTPException(status_code=404, detail="Rental slug is required")
+
         rentals = await rental_repo.filter_rentals(slug=slug)
         rental = rentals[0] if rentals else None
-          
-        
+        if not rental:
+            raise HTTPException(status_code=404, detail="Rental not found")
+
+
         return {
             'success':True,
             'message':"Rental retrieved successfully",
             'data':rental,
-    
+
         }
 
-        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Unexpected error retrieving rentals", exc_info=e)
         raise HTTPException(
             status_code=500,
             detail="An unexpected error occurred while retrieving rentals"
         )
-
-
-@rental_router.get("/{public_id}")
-@limiter.limit("5/second")
-async def get_rental_by_public_id( request: Request,public_id: str):
-    try:
-        rental_repo = get_rental_repo()
-        
-        if not  public_id:
-            raise HTTPException(
-                status_code=404,
-                detail=str(e)
-            )
-            
-        rentals = await rental_repo.filter_rentals(public_id=public_id)
-        rental = rentals[0] if rentals else None
-          
-        
-        return {
-            'success':True,
-            'message':"Rental retrieved successfully",
-            'data':rental,
-    
-        }
-
-        
-    except Exception as e:
-        logger.error("Unexpected error retrieving rentals", exc_info=e)
-        raise HTTPException(
-            status_code=500,
-            detail="An unexpected error occurred while retrieving rentals"
-        )
-
-
 
 # Personalized endpoint - requires user authentication
 @rental_router.get("/personalized/{user_id}", response_model=ListRentalResponse)
@@ -673,7 +662,7 @@ async def list_personalized_rentals(
 ) -> ListRentalResponse:
     """
     Get personalized rental recommendations for a specific user.
-    
+
     Requires authentication. Returns rentals tailored to the user's
     preferences, search history, and behavior.
     """
@@ -684,9 +673,9 @@ async def list_personalized_rentals(
                 status_code=403,
                 detail="Not authorized to access this user's personalized rentals"
             )
-        
+
         rental_repo = get_rental_repo()
-        
+
         # Get personalized rentals based on user preferences
         rentals = await rental_repo.list_personalized_rentals(
             user_id=user_id,
@@ -694,13 +683,13 @@ async def list_personalized_rentals(
             limit=limit,
             filters=filters
         )
-        
+
         # Get total count for pagination
         total_count = await rental_repo.get_personalized_rental_count(
             user_id=user_id,
             filters=filters
         )
-        
+
         return ListRentalResponse(
             success=True,
             message="Personalized rentals retrieved successfully",
@@ -719,10 +708,10 @@ async def list_personalized_rentals(
             status_code=400,
             detail=str(e)
         )
-        
+
     except HTTPException:
         raise
-        
+
     except Exception as e:
         logger.error(f"Unexpected error retrieving personalized rentals for user {user_id}", exc_info=e)
         raise HTTPException(
@@ -743,13 +732,13 @@ async def list_featured_rentals(
 ) -> ListRentalResponse:
     """
     Get featured rental listings.
-    
+
     Accessible to both authenticated and anonymous users.
     Returns curated featured properties that are promoted or highlighted.
     """
     try:
         rental_repo = get_rental_repo()
-        
+
         # Determine if we should personalize for logged-in users
         if current_user and user_id and current_user.id == user_id:
             # Get personalized featured rentals
@@ -766,12 +755,12 @@ async def list_featured_rentals(
                 limit=limit
             )
             message = "Featured rentals retrieved successfully"
-        
+
         # Get total count for pagination
         total_count = await rental_repo.get_featured_rental_count(
             user_id=user_id if current_user else None
         )
-        
+
         return ListRentalResponse(
             success=True,
             message=message,
@@ -790,7 +779,7 @@ async def list_featured_rentals(
             status_code=400,
             detail=str(e)
         )
-        
+
     except Exception as e:
         logger.error("Unexpected error retrieving featured rentals", exc_info=e)
         raise HTTPException(
@@ -804,7 +793,7 @@ async def list_featured_rentals(
 # Featured rentals - accessible to both logged-in and logged-out users
 @rental_router.get("/trending", response_model=ListRentalResponse)
 @limiter.limit("1/second")
-async def list_featured_rentals(
+async def list_trending_rentals(
     request: Request,
     page: int = 1,
     limit: int = 10,
@@ -813,13 +802,13 @@ async def list_featured_rentals(
 ) -> ListRentalResponse:
     """
     Get featured rental listings.
-    
+
     Accessible to both authenticated and anonymous users.
     Returns curated featured properties that are promoted or highlighted.
     """
     try:
         rental_repo = get_rental_repo()
-        
+
         # Determine if we should personalize for logged-in users
         if current_user and user_id and current_user.id == user_id:
             # Get personalized featured rentals
@@ -828,20 +817,20 @@ async def list_featured_rentals(
                 page=page,
                 limit=limit
             )
-            message = "Personalized featured rentals retrieved successfully"
+            message = "Personalized trending rentals retrieved successfully"
         else:
             # Get general featured rentals for public/anonymous users
             rentals = await rental_repo.list_public_featured_rentals(
                 page=page,
                 limit=limit
             )
-            message = "Featured rentals retrieved successfully"
-        
+            message = "Trending rentals retrieved successfully"
+
         # Get total count for pagination
         total_count = await rental_repo.get_featured_rental_count(
             user_id=user_id if current_user else None
         )
-        
+
         return ListRentalResponse(
             success=True,
             message=message,
@@ -860,16 +849,16 @@ async def list_featured_rentals(
             status_code=400,
             detail=str(e)
         )
-        
+
     except Exception as e:
         logger.error("Unexpected error retrieving featured rentals", exc_info=e)
         raise HTTPException(
             status_code=500,
             detail="An unexpected error occurred while retrieving featured rentals"
         )
-        
-        
-        
+
+
+
 # Interactive rentals - requires user authentication
 @rental_router.get("/interactive/{user_id}", response_model=ListRentalResponse)
 @limiter.limit("1/second")
@@ -882,7 +871,7 @@ async def list_interactive_rentals(
 ) -> ListRentalResponse:
     """
     Get interactive rental experiences.
-    
+
     Requires authentication. Returns rentals with interactive features
     such as virtual tours, live Q&A, or real-time availability.
     """
@@ -893,19 +882,19 @@ async def list_interactive_rentals(
                 status_code=403,
                 detail="Not authorized to access this user's interactive rentals"
             )
-        
+
         rental_repo = get_rental_repo()
-        
+
         # Get interactive rentals
         rentals = await rental_repo.list_interactive_rentals(
             user_id=user_id,
             page=page,
             limit=limit
         )
-        
+
         # Get total count for pagination
         total_count = await rental_repo.get_interactive_rental_count(user_id)
-        
+
         return ListRentalResponse(
             success=True,
             message="Interactive rentals retrieved successfully",
@@ -924,10 +913,10 @@ async def list_interactive_rentals(
             status_code=400,
             detail=str(e)
         )
-        
+
     except HTTPException:
         raise
-        
+
     except Exception as e:
         logger.error(f"Unexpected error retrieving interactive rentals for user {user_id}", exc_info=e)
         raise HTTPException(
@@ -946,13 +935,13 @@ async def get_search_suggestions(
 ):
     """
     Get search suggestions for autocomplete
-    
+
     Returns:
         List of suggested search terms, locations, and categories
     """
     try:
         rental_repo = get_rental_repo()
-        
+
         # Get suggestions from various sources
         suggestions = {
             "locations": await rental_repo.get_location_suggestions(q, limit),
@@ -965,13 +954,13 @@ async def get_search_suggestions(
                 "affordable room near university"
             ]
         }
-        
+
         return {
             "success": True,
             "query": q,
             "suggestions": suggestions
         }
-        
+
     except Exception as e:
         logger.error(f"Error getting suggestions: {e}")
         return {
@@ -980,32 +969,32 @@ async def get_search_suggestions(
             "suggestions": {},
             "error": "Failed to get suggestions"
         }
-        
-           
+
+
 
 async def filter_mapper_to_db_search(payload: dict) -> dict:
     """
     Map parsed query entities to database filter parameters
-    
+
     Args:
         payload: Dictionary containing parsed query results from get_query_parser
-    
+
     Returns:
         Dictionary with database filter parameters
     """
     mapped_payload = {}
-    
+
     # Extract entities from the parsed query
     entities = payload.get('entities', {})
-    
+
     # Map bedrooms
     if 'bedrooms' in entities:
         mapped_payload['bedrooms'] = entities['bedrooms']
-    
+
     # Map bathrooms
     if 'bathrooms' in entities:
         mapped_payload['bathrooms'] = entities['bathrooms']
-    
+
     # Map price - handle different price formats
     if 'price' in entities:
         price_value = entities['price']
@@ -1020,14 +1009,14 @@ async def filter_mapper_to_db_search(payload: dict) -> dict:
                 mapped_payload['max_price'] = price_num
             except (ValueError, TypeError):
                 pass
-    
+
     # Map max_price
     elif 'max_price' in entities:
         try:
             mapped_payload['max_price'] = float(entities['max_price'])
         except (ValueError, TypeError):
             pass
-    
+
     # Map price_range (format: "under 50000" or "30000-50000")
     elif 'price_range' in entities:
         price_range = str(entities['price_range'])
@@ -1046,7 +1035,7 @@ async def filter_mapper_to_db_search(payload: dict) -> dict:
                 mapped_payload['max_price'] = float(max_price.strip())
             except (ValueError, TypeError):
                 pass
-    
+
     # Map location/city
     if 'location' in entities:
         location = entities['location']
@@ -1054,7 +1043,7 @@ async def filter_mapper_to_db_search(payload: dict) -> dict:
             # Check if it's a known city or area
             # You might want to add logic here to distinguish between city and area
             mapped_payload['city'] = location.title()  # Capitalize first letter of each word
-    
+
     # Map area (if separate from city)
     if 'area' in entities:
         area = entities['area']
@@ -1062,7 +1051,7 @@ async def filter_mapper_to_db_search(payload: dict) -> dict:
             # If we have area but not city, we might need geocoding
             # For now, we'll treat area as city or implement area lookup
             mapped_payload['city'] = area.title()
-    
+
     # Map amenities
     if 'amenities' in entities:
         amenities = entities['amenities']
@@ -1070,13 +1059,13 @@ async def filter_mapper_to_db_search(payload: dict) -> dict:
             mapped_payload['amenities'] = amenities
         elif isinstance(amenities, str):
             mapped_payload['amenities'] = [amenities]
-    
+
     # Map property type to category
     if 'property_type' in entities:
         property_type = entities['property_type'].lower()
         category_map = {
             'apartment': 'APARTMENT',
-            'house': 'HOUSE', 
+            'house': 'HOUSE',
             'flat': 'APARTMENT',
             'condo': 'APARTMENT',
             'villa': 'HOUSE',
@@ -1091,7 +1080,7 @@ async def filter_mapper_to_db_search(payload: dict) -> dict:
         }
         if property_type in category_map:
             mapped_payload['category'] = category_map[property_type]
-    
+
     # Map room_type to category
     elif 'room_type' in entities:
         room_type = entities['room_type'].lower()
@@ -1099,11 +1088,11 @@ async def filter_mapper_to_db_search(payload: dict) -> dict:
             mapped_payload['category'] = 'STUDIO'
         elif room_type in ['single', 'double']:
             mapped_payload['category'] = 'ROOM'
-    
+
     # Default filters
     mapped_payload['status'] = 'vacant'  # Only show active rentals
     mapped_payload['is_verified'] = True  # Only show verified rentals by default
-    
+
     return mapped_payload
 
 
@@ -1133,7 +1122,7 @@ async def search_rentals(
 ):
     """
     Search rentals with natural language query and/or specific filters
-    
+
     Example queries:
     - "2 bedroom apartment in Nairobi with wifi under 50000"
     - "studio near university with parking"
@@ -1141,81 +1130,81 @@ async def search_rentals(
     """
     try:
         rental_repo = get_rental_repo()
-        
+
         # Initialize filter parameters
         filter_params = {
             'limit': page_size,
             'offset': (page - 1) * page_size
         }
-        
+
         # Add explicit filter parameters if provided
         if category:
             filter_params['category'] = category[0] if len(category) == 1 else category
-        
+
         if price_min is not None:
             filter_params['min_price'] = float(price_min)
-        
+
         if price_max is not None:
             filter_params['max_price'] = float(price_max)
-        
+
         if lat is not None and long is not None:
             filter_params['lat'] = lat
             filter_params['long'] = long
             filter_params['radius'] = radius
-        
+
         if amenities:
             filter_params['amenities'] = amenities
-        
+
         if status:
             filter_params['status'] = status[0] if len(status) == 1 else status
-        
+
         if bedrooms is not None:
             filter_params['bedrooms'] = bedrooms
-        
+
         if bathrooms is not None:
             filter_params['bathrooms'] = bathrooms
-        
+
         if city:
             filter_params['city'] = city
-        
+
         if state:
             filter_params['state'] = state
-        
+
         if is_featured is not None:
             filter_params['is_featured'] = is_featured
-        
+
         if is_verified is not None:
             filter_params['is_verified'] = is_verified
-        
+
         # Process natural language query if provided
         parsed_query = None
         if query:
             parsed_query = await get_query_parser(query)
-            
+
             if parsed_query.get('success', False):
                 # Map parsed entities to database filters
                 query_filters = await filter_mapper_to_db_search(parsed_query)
-                
+
                 # Merge query filters with explicit filters
                 # Query filters take precedence for overlapping fields
                 for key, value in query_filters.items():
                     if key not in filter_params or filter_params[key] is None:
                         filter_params[key] = value
-        
+
         # Apply sorting
         if sort_by:
             # You might need to extend your repository to handle sorting
             # For now, we'll just pass it as a parameter
             filter_params['sort_by'] = sort_by
-        
+
         # Execute search
-        
+
         data = await rental_repo.filter_rentals(**filter_params)
-        
+
         # Calculate pagination info
         total_results = len(data)
         total_pages = (total_results + page_size - 1) // page_size if page_size > 0 else 1
-        
+
         return {
             "success": True,
             "message": "Search completed successfully",
@@ -1238,7 +1227,7 @@ async def search_rentals(
     except ValueError as e:
         logger.warning(f"Validation error in search: {e}")
         raise HTTPException(status_code=400, detail=str(e))
-        
+
     except Exception as e:
         logger.error("Unexpected error in search", exc_info=e)
         raise HTTPException(
@@ -1246,5 +1235,33 @@ async def search_rentals(
             detail="An unexpected error occurred while searching rentals"
         )
 
-        
-    
+
+
+@rental_router.get("/{public_id}")
+@limiter.limit("5/second")
+async def get_rental_by_public_id(request: Request, public_id: str):
+    try:
+        rental_repo = get_rental_repo()
+
+        if not public_id:
+            raise HTTPException(status_code=404, detail="Rental ID is required")
+
+        rentals = await rental_repo.filter_rentals(public_id=public_id)
+        rental = rentals[0] if rentals else None
+        if not rental:
+            raise HTTPException(status_code=404, detail="Rental not found")
+
+        return {
+            'success': True,
+            'message': "Rental retrieved successfully",
+            'data': rental,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Unexpected error retrieving rentals", exc_info=e)
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while retrieving rentals"
+        )
